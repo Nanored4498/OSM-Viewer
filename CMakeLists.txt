@@ -17,9 +17,6 @@ endif()
 
 add_subdirectory(src/proto)
 
-# Definitions
-add_definitions(-DSHADER_DIR=\"${CMAKE_SOURCE_DIR}/shaders\")
-
 # Sources
 file(GLOB SOURCES
 	src/*.cpp
@@ -27,18 +24,25 @@ file(GLOB SOURCES
 	src/proto/*.cpp
 	src/proto/generated/*.cpp
 )
-include_directories(src)
-include_directories(src/proto)
 
 # Find packages
 find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(ZLIB REQUIRED)
 
-# Link libraries
-link_libraries(
+add_executable(${PROJECT_NAME} ${SOURCES})
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+	SHADER_DIR=\"${CMAKE_SOURCE_DIR}/shaders\"
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+	src
+	src/proto
+)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE
 	${OPENGL_LIBRARIES}
 	${ZLIB_LIBRARIES}
 	glfw
 )
-add_executable(${PROJECT_NAME} ${SOURCES})

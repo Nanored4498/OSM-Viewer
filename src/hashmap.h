@@ -22,6 +22,26 @@ protected:
 	std::vector<Node> v;
 
 public:
+	struct const_iterator {
+		using iterator_category = std::forward_iterator_tag;
+		using difference_type   = std::ptrdiff_t;
+		using value_type        = const std::pair<int64_t, const T&>;
+		using pointer           = const std::pair<int64_t, const T&>*;
+		using reference         = const std::pair<int64_t, const T&>;
+
+		const Node* it;
+
+		const_iterator(const Node* it): it(it) {}
+
+		reference operator*() const { return std::make_pair(it->id, it->v); }
+		const_iterator& operator++() { ++it; return *this; }
+		const_iterator operator++(int) { const_iterator tmp = *this; ++(*this); return tmp; }
+		bool operator==(const const_iterator& other) const { return it == other.it; }
+	};
+
+	const_iterator begin() const { return v.data(); }
+	const_iterator end() const { return v.data() + v.size(); }
+
 	inline int key(int64_t id) const {
 		return id % buckets.size();
 	}

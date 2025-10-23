@@ -11,15 +11,12 @@
 #include <numbers>
 #include <unordered_set>
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#include "glad/gl.h"
-
 // TODO: rewrite decompression
 #include <zlib.h>
 
 #include "hashmap.h"
 #include "utils.h"
+#include "window.h"
 
 #include "proto/generated/osm.pb.h"
 
@@ -48,28 +45,13 @@ struct Node {
 HashMap<Node> nodes;
 vector<vector<int64_t>> motorways, departments;
 
-static GLint succes;
-static GLchar infoLog[1024];
-static GLint compileShaderFile(GLuint shader, const char* fileName) {
-	ifstream file(fileName, ios::ate);
-	if(!file) THROW_ERROR("Failed to open shader file:" + string(fileName));
-	const GLint size = (GLint) file.tellg();
-	char* src = new char[size];
-	file.seekg(0);
-	file.read(src, size);
-	file.close();
-	glShaderSource(shader, 1, &src, &size);
-	glCompileShader(shader);
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &succes);
-	if(!succes) glGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);
-	return succes;
-}
-
 int main() {
 	BinStream input("map/lorraine-latest.osm.pbf");
 	uint32_t blobHeaderSize;
 	vector<uint8_t> wire;
 	bool hasHeader = false;
+	Proto::HeaderBBox bbox;
+	bbox.right = numeric_limits<int64_t>::min();
 	while(input.readInt(blobHeaderSize)) {
 		wire.resize(blobHeaderSize);
 		input.read(reinterpret_cast<char*>(wire.data()), wire.size());
@@ -95,10 +77,7 @@ int main() {
 			}
 			hasHeader = true;
 			const Proto::HeaderBlock hb(data);
-			if(hb._has_bbox) {
-				cout << "BBOX:\n\t";
-				cout << hb.bbox.bottom << ' ' << hb.bbox.top << ' ' << hb.bbox.left << ' ' << hb.bbox.right << endl;
-			}
+			if(hb._has_bbox) bbox = hb.bbox;
 			for(const string &feature : hb.required_features) {
 				if(!supported_features.count(feature)) {
 					cerr << "Not supported required feature: " << feature << endl;
@@ -193,97 +172,55 @@ int main() {
 		}
 	}
 
-	int windowWidth = 800;
-	int windowHeight = 600;
-	if(!glfwInit()) {
-		cerr << "Failed to init GLFW\n";
-		exit(1);
-	}
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	#ifndef NDEBUG
-	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
-	#endif
-	glfwWindowHint(GLFW_SAMPLES, 4);
-	GLFWwindow *window = glfwCreateWindow(windowWidth, windowHeight, "OSM", nullptr, nullptr);
-	glfwMakeContextCurrent(window);
-	gladLoadGL(glfwGetProcAddress);
-	glfwSwapInterval(1);
-
-	// create program
-	const GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
-	const GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-	if(!compileShaderFile(vert_shader, SHADER_DIR "/main.vert"))
-		THROW_ERROR(string("Failed to compile vertex shader: " SHADER_DIR "/main.vert\n") + infoLog);
-	if(!compileShaderFile(frag_shader, SHADER_DIR "/main.frag"))
-		THROW_ERROR(string("Failed to compile fragment shader: " SHADER_DIR "/main.frag\n") + infoLog);
-	GLuint prog = glCreateProgram();
-	glAttachShader(prog, vert_shader);
-	glAttachShader(prog, frag_shader);
-	glLinkProgram(prog);
-	glGetProgramiv(prog, GL_LINK_STATUS, &succes);
-	if(!succes) {
-		glGetProgramInfoLog(prog, sizeof(infoLog), nullptr, infoLog);
-		THROW_ERROR(string("Failed to link program: \n") + infoLog);
-	}
-	glDeleteShader(vert_shader);
-	glDeleteShader(frag_shader);
-
-	// get locations
-	GLint pLoc = glGetAttribLocation(prog, "p");
-	GLint colorLoc = glGetUniformLocation(prog, "color");
-	GLint centerLoc = glGetUniformLocation(prog, "center");
-	GLint scaleLoc = glGetUniformLocation(prog, "scale");
-
-	// setup camera
-	float cX = 0.1075, cY = 0.9779;
-	float scale = 2.4e4;
-
-		// VBO
-		GLuint VBO;
-		glGenBuffers(1, &VBO);
-		glBindBuffer(GL_ARRAY_BUFFER, VBO);
-		GLsizei VBOsize = 0;
-		for(const auto &mw : motorways) VBOsize += 2*(mw.size()-1);
-		glBufferData(GL_ARRAY_BUFFER, VBOsize * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
-		float *mapV = (float*) glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-		for(const auto &mw : motorways) {
-			const int n = mw.size();
-			for(int i = 1; i < n; ++i) {
-				*(mapV++) = double(nodes[mw[i-1]].lon) * numbers::pi / 180e9;
-				*(mapV++) = log(tan(numbers::pi * (double(nodes[mw[i-1]].lat) / 360e9 + .25)));
-				*(mapV++) = double(nodes[mw[i]].lon) * numbers::pi / 180e9;
-				*(mapV++) = log(tan(numbers::pi * (double(nodes[mw[i]].lat) / 360e9 + .25)));
-			}
+	if(bbox.right == numeric_limits<int64_t>::min()) {
+		bbox.left = numeric_limits<int64_t>::max();
+		bbox.top = numeric_limits<int64_t>::min();
+		bbox.bottom = numeric_limits<int64_t>::max();
+		for(const auto &[id, node] : nodes) {
+			bbox.left   = min(bbox.left,   node.lon);
+			bbox.right  = max(bbox.right,  node.lon);
+			bbox.bottom = min(bbox.bottom, node.lat);
+			bbox.top    = max(bbox.top,    node.lat);
 		}
-		glUnmapBuffer(GL_ARRAY_BUFFER);
-
-		// VAO
-		GLuint VAO;
-		glGenVertexArrays(1, &VAO);
-		glBindVertexArray(VAO);
-		glVertexAttribPointer(pLoc, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-		glEnableVertexAttribArray(pLoc);
-		glBindVertexArray(0);
-
-	while(!glfwWindowShouldClose(window)) {
-		glClearColor(1.f, 1.f, 1.f, 1.f);
-		glClear(GL_COLOR_BUFFER_BIT);
-		glUseProgram(prog);
-		glUniform2f(centerLoc, cX, cY);
-		glUniform2f(scaleLoc, scale/windowWidth, scale/windowHeight);
-
-		glLineWidth(3.f);
-		glUniform3f(colorLoc, 1.f, 0.f, 0.1f);
-		glBindVertexArray(VAO);
-		glDrawArrays(GL_LINES, 0, VBOsize);
-
-		glfwSwapBuffers(window);
-		glfwPollEvents();
 	}
-	glfwDestroyWindow(window);
-	glfwTerminate();
+
+	const auto lon2Float = [](int64_t x) {
+		return double(x) * (numbers::pi / 180e9);
+	};
+	const auto lat2Float = [](int64_t x) {
+		return log(tan(numbers::pi * (double(x) / 360e9 + .25)));
+	};
+
+	Window window;
+	window.init(lon2Float(bbox.left), lon2Float(bbox.right), lat2Float(bbox.bottom), lat2Float(bbox.top));
+
+	// VBO
+	GLuint VBO;
+	glGenBuffers(1, &VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	window.VBOsize = 0;
+	for(const auto &mw : motorways) window.VBOsize += 2*(mw.size()-1);
+	glBufferData(GL_ARRAY_BUFFER, window.VBOsize * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
+	float *mapV = (float*) glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	for(const auto &mw : motorways) {
+		const int n = mw.size();
+		for(int i = 1; i < n; ++i) {
+			*(mapV++) = lon2Float(nodes[mw[i-1]].lon);
+			*(mapV++) = lat2Float(nodes[mw[i-1]].lat);
+			*(mapV++) = lon2Float(nodes[mw[i]].lon);
+			*(mapV++) = lat2Float(nodes[mw[i]].lat);
+		}
+	}
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+
+	// VAO
+	glGenVertexArrays(1, &window.VAO);
+	glBindVertexArray(window.VAO);
+	glVertexAttribPointer(window.pLoc, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(window.pLoc);
+	glBindVertexArray(0);
+
+	window.start();
 
 	return 0;
 }
