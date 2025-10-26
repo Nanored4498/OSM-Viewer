@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <ranges>
 
 #include "utils.h"
 
@@ -140,16 +141,24 @@ void Window::init(float x0, float x1, float y0, float y1) {
 
 void Window::start() {
 	while(!glfwWindowShouldClose(window)) {
-		glClearColor(1.f, 1.f, 1.f, 1.f);
+		glClearColor(0.945f, 0.933f, 0.910f, 1.f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		glUseProgram(prog);
 		glUniform2f(centerLoc, centerX, centerY);
 		glUniform2f(scaleLoc, scale/width, scale/height);
 
-		glLineWidth(3.f);
-		glUniform3f(colorLoc, 1.f, 0.f, 0.1f);
 		glBindVertexArray(VAO);
-		glDrawArrays(GL_LINES, 0, VBOsize);
+		glLineWidth(5.f);
+		for(const Road &r : roads | views::reverse) {
+			if(!r.border) continue;
+			glUniform3f(colorLoc, r.r2, r.g2, r.b2);
+			glDrawArrays(GL_LINES, r.first, r.count);
+		}
+		glLineWidth(3.f);
+		for(const Road &r : roads | views::reverse) {
+			glUniform3f(colorLoc, r.r, r.g, r.b);
+			glDrawArrays(GL_LINES, r.first, r.count);
+		}
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

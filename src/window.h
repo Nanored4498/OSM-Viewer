@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // See <https://www.gnu.org/licenses/>
 
+#include <vector>
+
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "glad/gl.h"
@@ -16,8 +18,15 @@ struct Window {
 	void setAspect(int width, int height);
 
 	GLuint VAO;
-	GLsizei VBOsize;
 	GLint pLoc, colorLoc, centerLoc, scaleLoc;
+	struct Road {
+		float r, g, b;
+		float r2, g2, b2;
+		GLint first;
+		GLsizei count;
+		bool border;
+	};
+	std::vector<Road> roads;
 
 protected:
 	GLFWwindow *window;

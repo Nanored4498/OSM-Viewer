@@ -42,8 +42,27 @@ struct Node {
 	int64_t lon, lat;
 };
 
+struct Color {
+	float r, g, b;
+};
+
+struct RoadType {
+	string name;
+	Color col, col2;
+	bool border;
+};
+
 HashMap<Node> nodes;
-vector<vector<int64_t>> motorways, departments;
+
+constexpr RoadType roadTypes[] {
+	{"motorway", {0.914f, 0.565f, 0.627f}, {0.878f, 0.180f, 0.420f}, true},
+	{"trunk",    {0.988f, 0.753f, 0.675f}, {0.804f, 0.325f, 0.180f}, true},
+	{"primary",  {0.992f, 0.843f, 0.631f}, {0.671f, 0.482f, 0.012f}, false},
+	{"river",    {0.667f, 0.827f, 0.875f}, {0.667f, 0.827f, 0.875f}, false},
+};
+vector<vector<int64_t>> roads[std::size(roadTypes)], countryBorders;
+
+constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
 
 int main() {
 	BinStream input("map/lorraine-latest.osm.pbf");
@@ -112,20 +131,39 @@ int main() {
 					const int R = way.refs.size();
 					for(int i = 1; i < R; ++i)
 						way.refs[i] += way.refs[i-1];
-					bool admin_boundary = false;
-					bool department_lvl = false;
+					bool is_administrative_boundary = false;
+					int admin_level = -1;
 					for(int i = 0; i < T; ++i) {
 						const string key(ST[way.keys[i]].begin(), ST[way.keys[i]].end());
 						const string val(ST[way.vals[i]].begin(), ST[way.vals[i]].end());
-						if(key == "highway" && val == "motorway")
-							motorways.push_back(way.refs);
-						else if(key == "boundary" && val == "administrative")
-							admin_boundary = true;
-						else if(key == "admin_level" && val[0] <= '7')
-							department_lvl = true;
+						if(key == "highway" || key == "waterway") {
+							int i = 0;
+							while(i < (int) std::size(roadTypes) && val != roadTypes[i].name) ++i;
+							if(i < (int) std::size(roadTypes))
+								roads[i].push_back(way.refs);
+						} else if(key == "boundary") {
+							if(val == "administrative")
+								is_administrative_boundary = true;
+						} else if(key == "admin_level") {
+							admin_level = stoi(val);
+						}
 					}
-					if(admin_boundary && department_lvl)
-						departments.push_back(way.refs);
+					if(is_administrative_boundary) {
+						if(admin_level == 2) {
+							countryBorders.push_back(way.refs);
+							const Node &n = nodes[way.refs[0]];
+							if(n.lat < .12*bbox.bottom + .88*bbox.top && n.lon < .7*bbox.left + .3*bbox.right) {
+								cerr << way.id << ' ' << n.lon << ' ' << n.lat << ' ' << bbox.left << ' ' << bbox.right << endl;
+
+								for(int i = 0; i < T; ++i) {
+									const string key(ST[way.keys[i]].begin(), ST[way.keys[i]].end());
+									const string val(ST[way.vals[i]].begin(), ST[way.vals[i]].end());
+									cerr << key << ": " << val << "; ";
+								}
+								cerr << endl;
+							}
+						}
+					}
 					// WARNING: We don't care about Info here
 				}
 				for([[maybe_unused]] const Proto::Relation &relation : pg.relations) {
@@ -198,19 +236,54 @@ int main() {
 	GLuint VBO;
 	glGenBuffers(1, &VBO);
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	window.VBOsize = 0;
-	for(const auto &mw : motorways) window.VBOsize += 2*(mw.size()-1);
-	glBufferData(GL_ARRAY_BUFFER, window.VBOsize * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
+	GLsizei roadsCount = 0;
+	for(int i = 0; i < (int) std::size(roads); ++i) {
+		Window::Road &wr = window.roads.emplace_back();
+		wr.r = roadTypes[i].col.r;
+		wr.g = roadTypes[i].col.g;
+		wr.b = roadTypes[i].col.b;
+		wr.r2 = roadTypes[i].col2.r;
+		wr.g2 = roadTypes[i].col2.g;
+		wr.b2 = roadTypes[i].col2.b;
+		wr.border = roadTypes[i].border;
+		wr.first = roadsCount;
+		wr.count = 0;
+		for(const auto &r : roads[i]) wr.count += 2*(r.size()-1);
+		roadsCount += wr.count;
+	}
+	{ // Country border
+		Window::Road &wr = window.roads.emplace_back();
+		wr.r = countryBorderColor.r;
+		wr.g = countryBorderColor.g;
+		wr.b = countryBorderColor.b;
+		wr.border = false;
+		wr.first = roadsCount;
+		wr.count = 0;
+		for(const auto &r : countryBorders) wr.count += 2*(r.size()-1);
+		roadsCount += wr.count;
+	}
+	glBufferData(GL_ARRAY_BUFFER, roadsCount * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
 	float *mapV = (float*) glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-	for(const auto &mw : motorways) {
-		const int n = mw.size();
-		for(int i = 1; i < n; ++i) {
-			*(mapV++) = lon2Float(nodes[mw[i-1]].lon);
-			*(mapV++) = lat2Float(nodes[mw[i-1]].lat);
-			*(mapV++) = lon2Float(nodes[mw[i]].lon);
-			*(mapV++) = lat2Float(nodes[mw[i]].lat);
+	for(const auto &roads : roads) {
+		for(const auto &r : roads) {
+			const int n = r.size();
+			for(int i = 1; i < n; ++i) {
+				*(mapV++) = lon2Float(nodes[r[i-1]].lon);
+				*(mapV++) = lat2Float(nodes[r[i-1]].lat);
+				*(mapV++) = lon2Float(nodes[r[i]].lon);
+				*(mapV++) = lat2Float(nodes[r[i]].lat);
+			}
 		}
 	}
+		for(const auto &r : countryBorders) {
+			const int n = r.size();
+			for(int i = 1; i < n; ++i) {
+				*(mapV++) = lon2Float(nodes[r[i-1]].lon);
+				*(mapV++) = lat2Float(nodes[r[i-1]].lat);
+				*(mapV++) = lon2Float(nodes[r[i]].lon);
+				*(mapV++) = lat2Float(nodes[r[i]].lat);
+			}
+		}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
 
 	// VAO
