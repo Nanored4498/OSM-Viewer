@@ -61,6 +61,7 @@ constexpr RoadType roadTypes[] {
 	{"river",    {0.667f, 0.827f, 0.875f}, {0.667f, 0.827f, 0.875f}, false},
 };
 vector<vector<int64_t>> roads[std::size(roadTypes)], countryBorders;
+vector<int64_t> capitals;
 
 constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
 
@@ -131,7 +132,7 @@ int main() {
 					const int R = way.refs.size();
 					for(int i = 1; i < R; ++i)
 						way.refs[i] += way.refs[i-1];
-					bool is_administrative_boundary = false;
+					bool is_boundary = false;
 					int admin_level = -1;
 					for(int i = 0; i < T; ++i) {
 						const string key(ST[way.keys[i]].begin(), ST[way.keys[i]].end());
@@ -143,12 +144,12 @@ int main() {
 								roads[i].push_back(way.refs);
 						} else if(key == "boundary") {
 							if(val == "administrative")
-								is_administrative_boundary = true;
+								is_boundary = true;
 						} else if(key == "admin_level") {
 							admin_level = stoi(val);
 						}
 					}
-					if(is_administrative_boundary) {
+					if(is_boundary) {
 						if(admin_level == 2) {
 							countryBorders.push_back(way.refs);
 							const Node &n = nodes[way.refs[0]];
@@ -164,10 +165,13 @@ int main() {
 							}
 						}
 					}
-					// WARNING: We don't care about Info here
 				}
-				for([[maybe_unused]] const Proto::Relation &relation : pg.relations) {
-					// WARNING: Currently not implemented
+				for(const Proto::Relation &relation : pg.relations) {
+					const int T = relation.keys.size();
+					if(T != (int) relation.vals.size()) {
+						cerr << "Sizes mismatch in way's tags... (" << __FILE__ << ':' << __LINE__ << ")\n";
+						exit(1);
+					}
 				}
 				for([[maybe_unused]] const Proto::ChangeSet &changeset : pg.changesets) {
 					cerr << "Not implemented (" << __FILE__ << ':' << __LINE__ << ")\n";
@@ -189,11 +193,25 @@ int main() {
 						Node &node = nodes[id];
 						node.lon = pb.lon_offset + pb.granularity * lon;
 						node.lat = pb.lat_offset + pb.granularity * lat;
+						string place, name;
+						int capital = -1;
 						while(*kv_it) {
 							const string key(ST[*kv_it].begin(), ST[*kv_it].end());
 							++ kv_it;
 							const string val(ST[*kv_it].begin(), ST[*kv_it].end());
 							++ kv_it;
+							if(key == "place") {
+								place = val;
+							} else if(key == "name") {
+								name = val;
+							} else if(key == "capital") {
+								if(val == "yes") capital = 2;
+								else capital = stoi(val);
+							}
+						}
+						if(place == "city") {
+							if(capital >= 0 && capital <= 6)
+								capitals.push_back(id);
 						}
 						++ kv_it;
 					}
@@ -236,7 +254,7 @@ int main() {
 	GLuint VBO;
 	glGenBuffers(1, &VBO);
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	GLsizei roadsCount = 0;
+	GLsizei VBOcount = 0;
 	for(int i = 0; i < (int) std::size(roads); ++i) {
 		Window::Road &wr = window.roads.emplace_back();
 		wr.r = roadTypes[i].col.r;
@@ -246,10 +264,10 @@ int main() {
 		wr.g2 = roadTypes[i].col2.g;
 		wr.b2 = roadTypes[i].col2.b;
 		wr.border = roadTypes[i].border;
-		wr.first = roadsCount;
+		wr.first = VBOcount;
 		wr.count = 0;
 		for(const auto &r : roads[i]) wr.count += 2*(r.size()-1);
-		roadsCount += wr.count;
+		VBOcount += wr.count;
 	}
 	{ // Country border
 		Window::Road &wr = window.roads.emplace_back();
@@ -257,12 +275,15 @@ int main() {
 		wr.g = countryBorderColor.g;
 		wr.b = countryBorderColor.b;
 		wr.border = false;
-		wr.first = roadsCount;
+		wr.first = VBOcount;
 		wr.count = 0;
 		for(const auto &r : countryBorders) wr.count += 2*(r.size()-1);
-		roadsCount += wr.count;
+		VBOcount += wr.count;
 	}
-	glBufferData(GL_ARRAY_BUFFER, roadsCount * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
+	window.capitalsFirst = VBOcount;
+	window.capitalsCount = capitals.size();
+	VBOcount += capitals.size();
+	glBufferData(GL_ARRAY_BUFFER, VBOcount * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
 	float *mapV = (float*) glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	for(const auto &roads : roads) {
 		for(const auto &r : roads) {
@@ -275,15 +296,19 @@ int main() {
 			}
 		}
 	}
-		for(const auto &r : countryBorders) {
-			const int n = r.size();
-			for(int i = 1; i < n; ++i) {
-				*(mapV++) = lon2Float(nodes[r[i-1]].lon);
-				*(mapV++) = lat2Float(nodes[r[i-1]].lat);
-				*(mapV++) = lon2Float(nodes[r[i]].lon);
-				*(mapV++) = lat2Float(nodes[r[i]].lat);
-			}
+	for(const auto &r : countryBorders) {
+		const int n = r.size();
+		for(int i = 1; i < n; ++i) {
+			*(mapV++) = lon2Float(nodes[r[i-1]].lon);
+			*(mapV++) = lat2Float(nodes[r[i-1]].lat);
+			*(mapV++) = lon2Float(nodes[r[i]].lon);
+			*(mapV++) = lat2Float(nodes[r[i]].lat);
 		}
+	}
+	for(const int64_t id : capitals) {
+		*(mapV++) = lon2Float(nodes[id].lon);
+		*(mapV++) = lat2Float(nodes[id].lat);
+	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
 
 	// VAO

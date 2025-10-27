@@ -106,27 +106,42 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	// create program
 	const GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
 	const GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
+	const GLuint capital_frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
 	if(!compileShaderFile(vert_shader, SHADER_DIR "/main.vert"))
 		THROW_ERROR(string("Failed to compile vertex shader: " SHADER_DIR "/main.vert\n") + infoLog);
 	if(!compileShaderFile(frag_shader, SHADER_DIR "/main.frag"))
 		THROW_ERROR(string("Failed to compile fragment shader: " SHADER_DIR "/main.frag\n") + infoLog);
-	prog = glCreateProgram();
-	glAttachShader(prog, vert_shader);
-	glAttachShader(prog, frag_shader);
-	glLinkProgram(prog);
-	glGetProgramiv(prog, GL_LINK_STATUS, &succes);
-	if(!succes) {
-		glGetProgramInfoLog(prog, sizeof(infoLog), nullptr, infoLog);
-		THROW_ERROR(string("Failed to link program: \n") + infoLog);
+	if(!compileShaderFile(capital_frag_shader, SHADER_DIR "/capital.frag"))
+		THROW_ERROR(string("Failed to compile fragment shader: " SHADER_DIR "/capital.frag\n") + infoLog);
+	struct ProgLink {
+		GLuint *prog, vert, frag;
+	};
+	for(const auto &[prog, vert, frag] : {
+		ProgLink{&prog, vert_shader, frag_shader},
+		ProgLink{&progCapital, vert_shader, capital_frag_shader}
+	}) {
+		*prog = glCreateProgram();
+		glAttachShader(*prog, vert);
+		glAttachShader(*prog, frag);
+		glLinkProgram(*prog);
+		glGetProgramiv(*prog, GL_LINK_STATUS, &succes);
+		if(!succes) {
+			glGetProgramInfoLog(*prog, sizeof(infoLog), nullptr, infoLog);
+			THROW_ERROR(string("Failed to link program: \n") + infoLog);
+		}
 	}
 	glDeleteShader(vert_shader);
 	glDeleteShader(frag_shader);
+	glDeleteShader(capital_frag_shader);
 
 	// get locations
 	pLoc = glGetAttribLocation(prog, "p");
-	colorLoc = glGetUniformLocation(prog, "color");
 	centerLoc = glGetUniformLocation(prog, "center");
 	scaleLoc = glGetUniformLocation(prog, "scale");
+	colorLoc = glGetUniformLocation(prog, "color");
+	pLocCapital = glGetAttribLocation(progCapital, "p");
+	centerLocCapital = glGetUniformLocation(progCapital, "center");
+	scaleLocCapital = glGetUniformLocation(progCapital, "scale");
 
 	// setup camera
 	centerX = (x0 + x1) / 2.;
@@ -143,11 +158,12 @@ void Window::start() {
 	while(!glfwWindowShouldClose(window)) {
 		glClearColor(0.945f, 0.933f, 0.910f, 1.f);
 		glClear(GL_COLOR_BUFFER_BIT);
+
+		glBindVertexArray(VAO);
+
 		glUseProgram(prog);
 		glUniform2f(centerLoc, centerX, centerY);
 		glUniform2f(scaleLoc, scale/width, scale/height);
-
-		glBindVertexArray(VAO);
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
 			if(!r.border) continue;
@@ -159,6 +175,12 @@ void Window::start() {
 			glUniform3f(colorLoc, r.r, r.g, r.b);
 			glDrawArrays(GL_LINES, r.first, r.count);
 		}
+
+		glUseProgram(progCapital);
+		glUniform2f(centerLocCapital, centerX, centerY);
+		glUniform2f(scaleLocCapital, scale/width, scale/height);
+		glPointSize(12.f);
+		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

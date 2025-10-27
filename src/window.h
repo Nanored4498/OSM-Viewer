@@ -18,7 +18,7 @@ struct Window {
 	void setAspect(int width, int height);
 
 	GLuint VAO;
-	GLint pLoc, colorLoc, centerLoc, scaleLoc;
+	GLint pLoc;
 	struct Road {
 		float r, g, b;
 		float r2, g2, b2;
@@ -27,13 +27,18 @@ struct Window {
 		bool border;
 	};
 	std::vector<Road> roads;
+	GLint capitalsFirst;
+	GLsizei capitalsCount;
 
 protected:
 	GLFWwindow *window;
 	int width = 800;
 	int height = 600;
 
-	GLuint prog;
+	GLuint prog, progCapital;
+	GLint centerLoc, scaleLoc, colorLoc;
+	GLint pLocCapital, centerLocCapital, scaleLocCapital;
+
 
 	float centerX, centerY, scale;
 	float anchorX, anchorY;
