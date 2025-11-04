@@ -314,8 +314,8 @@ int main() {
 	// VAO
 	glGenVertexArrays(1, &window.VAO);
 	glBindVertexArray(window.VAO);
-	glVertexAttribPointer(window.pLoc, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-	glEnableVertexAttribArray(window.pLoc);
+	glVertexAttribPointer(window.progs.main.get_p(), 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(window.progs.main.get_p());
 	glBindVertexArray(0);
 
 	window.start();

@@ -8,6 +8,8 @@
 #include <GLFW/glfw3.h>
 #include "glad/gl.h"
 
+#include "programs/generated/programs.h"
+
 struct Window {
 	void init(float x0, float x1, float y0, float y1);
 	void start();
@@ -17,8 +19,17 @@ struct Window {
 	void moveAnchor(double x, double y);
 	void setAspect(int width, int height);
 
+// protected:
+	GLFWwindow *window;
+	int width = 800;
+	int height = 600;
+
 	GLuint VAO;
-	GLint pLoc;
+	Programs progs;
+
+	float centerX, centerY, scale;
+	float anchorX, anchorY;
+
 	struct Road {
 		float r, g, b;
 		float r2, g2, b2;
@@ -29,17 +40,4 @@ struct Window {
 	std::vector<Road> roads;
 	GLint capitalsFirst;
 	GLsizei capitalsCount;
-
-protected:
-	GLFWwindow *window;
-	int width = 800;
-	int height = 600;
-
-	GLuint prog, progCapital;
-	GLint centerLoc, scaleLoc, colorLoc;
-	GLint pLocCapital, centerLocCapital, scaleLocCapital;
-
-
-	float centerX, centerY, scale;
-	float anchorX, anchorY;
 };

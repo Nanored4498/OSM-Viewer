@@ -9,27 +9,10 @@
 #include <iostream>
 #include <ranges>
 
+#include "font.h"
 #include "utils.h"
 
 using namespace std;
-
-static GLint succes;
-static GLchar infoLog[1024];
-
-static GLint compileShaderFile(GLuint shader, const char* fileName) {
-	ifstream file(fileName, ios::ate);
-	if(!file) THROW_ERROR("Failed to open shader file:" + string(fileName));
-	const GLint size = (GLint) file.tellg();
-	char* src = new char[size];
-	file.seekg(0);
-	file.read(src, size);
-	file.close();
-	glShaderSource(shader, 1, &src, &size);
-	glCompileShader(shader);
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &succes);
-	if(!succes) glGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);
-	return succes;
-}
 
 static void scrollCallback(GLFWwindow* window, [[maybe_unused]] double xoffset, double yoffset) {
 	double x, y;
@@ -104,49 +87,24 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	frameBufferSizeCallback(window, width, height);
 
 	// create program
-	const GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
-	const GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-	const GLuint capital_frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-	if(!compileShaderFile(vert_shader, SHADER_DIR "/main.vert"))
-		THROW_ERROR(string("Failed to compile vertex shader: " SHADER_DIR "/main.vert\n") + infoLog);
-	if(!compileShaderFile(frag_shader, SHADER_DIR "/main.frag"))
-		THROW_ERROR(string("Failed to compile fragment shader: " SHADER_DIR "/main.frag\n") + infoLog);
-	if(!compileShaderFile(capital_frag_shader, SHADER_DIR "/capital.frag"))
-		THROW_ERROR(string("Failed to compile fragment shader: " SHADER_DIR "/capital.frag\n") + infoLog);
-	struct ProgLink {
-		GLuint *prog, vert, frag;
-	};
-	for(const auto &[prog, vert, frag] : {
-		ProgLink{&prog, vert_shader, frag_shader},
-		ProgLink{&progCapital, vert_shader, capital_frag_shader}
-	}) {
-		*prog = glCreateProgram();
-		glAttachShader(*prog, vert);
-		glAttachShader(*prog, frag);
-		glLinkProgram(*prog);
-		glGetProgramiv(*prog, GL_LINK_STATUS, &succes);
-		if(!succes) {
-			glGetProgramInfoLog(*prog, sizeof(infoLog), nullptr, infoLog);
-			THROW_ERROR(string("Failed to link program: \n") + infoLog);
-		}
-	}
-	glDeleteShader(vert_shader);
-	glDeleteShader(frag_shader);
-	glDeleteShader(capital_frag_shader);
-
-	// get locations
-	pLoc = glGetAttribLocation(prog, "p");
-	centerLoc = glGetUniformLocation(prog, "center");
-	scaleLoc = glGetUniformLocation(prog, "scale");
-	colorLoc = glGetUniformLocation(prog, "color");
-	pLocCapital = glGetAttribLocation(progCapital, "p");
-	centerLocCapital = glGetUniformLocation(progCapital, "center");
-	scaleLocCapital = glGetUniformLocation(progCapital, "scale");
+	progs.init();
 
 	// setup camera
 	centerX = (x0 + x1) / 2.;
 	centerY = (y0 + y1) / 2.;
 	scale = 2.f * min(width/(x1 - x0), height/(y1 - y0));
+
+	// Load fonts
+	Font::Atlas atlas = Font::getTTFAtlas(FONT_DIR "/Roboto-Medium.ttf", 21.f);
+	GLuint fontAtlasTexture;
+	glGenTextures(1, &fontAtlasTexture);
+	glBindTexture(GL_TEXTURE_2D, fontAtlasTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlas.width, atlas.height, 0, GL_RED, GL_UNSIGNED_BYTE, atlas.img.get());
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glBindTexture(GL_TEXTURE_2D, 0);
 
 	// TODO: to try
 	// glEnable(GL_LINE_SMOOTH);
@@ -161,24 +119,24 @@ void Window::start() {
 
 		glBindVertexArray(VAO);
 
-		glUseProgram(prog);
-		glUniform2f(centerLoc, centerX, centerY);
-		glUniform2f(scaleLoc, scale/width, scale/height);
+		progs.main.use();
+		progs.main.set_center(centerX, centerY);
+		progs.main.set_scale(scale/width, scale/height);
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
 			if(!r.border) continue;
-			glUniform3f(colorLoc, r.r2, r.g2, r.b2);
+			progs.main.set_color(r.r2, r.g2, r.b2);
 			glDrawArrays(GL_LINES, r.first, r.count);
 		}
 		glLineWidth(3.f);
 		for(const Road &r : roads | views::reverse) {
-			glUniform3f(colorLoc, r.r, r.g, r.b);
+			progs.main.set_color(r.r, r.g, r.b);
 			glDrawArrays(GL_LINES, r.first, r.count);
 		}
 
-		glUseProgram(progCapital);
-		glUniform2f(centerLocCapital, centerX, centerY);
-		glUniform2f(scaleLocCapital, scale/width, scale/height);
+		progs.capital.use();
+		progs.capital.set_center(centerX, centerY);
+		progs.capital.set_scale(scale/width, scale/height);
 		glPointSize(12.f);
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
 

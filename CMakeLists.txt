@@ -16,11 +16,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES GNU OR CMAKE_CXX_COMPILER_ID MATCHES Clang)
 endif()
 
 add_subdirectory(src/proto)
+add_subdirectory(src/programs)
 
 # Sources
 file(GLOB SOURCES
 	src/*.cpp
 	src/glad/*.c
+	src/programs/generated/*.cpp
 	src/proto/*.cpp
 	src/proto/generated/*.cpp
 )
@@ -32,8 +34,14 @@ find_package(ZLIB REQUIRED)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+add_dependencies(OSM
+	proto_generated
+	programs_generated
+)
+
 target_compile_definitions(${PROJECT_NAME} PRIVATE
 	SHADER_DIR=\"${CMAKE_SOURCE_DIR}/shaders\"
+	FONT_DIR=\"${CMAKE_SOURCE_DIR}/fonts\"
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
