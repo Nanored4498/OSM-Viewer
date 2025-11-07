@@ -109,6 +109,7 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	progs.text.set_fontAtlas(0);
 	atlas.img.~unique_ptr();
 
 	// TODO: to try
@@ -121,6 +122,8 @@ void Window::start() {
 	while(!glfwWindowShouldClose(window)) {
 		glClearColor(0.945f, 0.933f, 0.910f, 1.f);
 		glClear(GL_COLOR_BUFFER_BIT);
+
+		// TODO: Use UBO
 
 		glBindVertexArray(VAO);
 
@@ -145,14 +148,12 @@ void Window::start() {
 		glPointSize(12.f);
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
 
-		glBindVertexArray(VAOtext);
-
 		progs.text.use();
 		progs.text.set_center(centerX, centerY);
 		progs.text.set_scale(scale/width, scale/height);
 		progs.text.set_txtScale(2.f/width, 2.f/height);
-		progs.text.set_fontAtlas(0);
-		glDrawArrays(GL_TRIANGLES, 0, charactersCount);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, textSSBO);
+		glDrawArrays(GL_TRIANGLES, 0, 6*charactersCount);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

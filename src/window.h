@@ -25,7 +25,8 @@ struct Window {
 	int width = 800;
 	int height = 600;
 
-	GLuint VAO, VAOtext;
+	GLuint VAO;
+	GLuint textSSBO;
 	Programs progs;
 	Font::Atlas atlas;
 
