@@ -5,11 +5,17 @@
 #version 460
 
 in vec2 uv;
+in vec2 uv2;
 
 out vec4 fragColor;
 
 uniform sampler2D fontAtlas;
 
 void main() {
-	fragColor = vec4(vec3(1. - texture(fontAtlas, uv).r), 1.);
+	float b = texture(fontAtlas, uv).r;
+	float w = texture(fontAtlas, uv2).r;
+	float alpha = b+w-b*w;
+	if(alpha < 1e-3) discard;
+	float gray = w * (1. - b) / alpha;
+	fragColor = vec4(vec3(gray), alpha);
 }

@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <numbers>
+#include <ranges>
 #include <unordered_set>
 
 // TODO: rewrite decompression
@@ -61,7 +62,7 @@ constexpr RoadType roadTypes[] {
 	{"river",    {0.667f, 0.827f, 0.875f}, {0.667f, 0.827f, 0.875f}, false},
 };
 vector<vector<int64_t>> roads[std::size(roadTypes)], countryBorders;
-vector<int64_t> capitals;
+vector<pair<string, int64_t>> capitals;
 
 constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
 
@@ -211,7 +212,7 @@ int main() {
 						}
 						if(place == "city") {
 							if(capital >= 0 && capital <= 6)
-								capitals.push_back(id);
+								capitals.emplace_back(name, id);
 						}
 						++ kv_it;
 					}
@@ -254,6 +255,8 @@ int main() {
 	GLuint VBO;
 	glGenBuffers(1, &VBO);
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+
+	// Compute size
 	GLsizei VBOcount = 0;
 	for(int i = 0; i < (int) std::size(roads); ++i) {
 		Window::Road &wr = window.roads.emplace_back();
@@ -280,11 +283,20 @@ int main() {
 		for(const auto &r : countryBorders) wr.count += 2*(r.size()-1);
 		VBOcount += wr.count;
 	}
+	// Capitals points
 	window.capitalsFirst = VBOcount;
 	window.capitalsCount = capitals.size();
 	VBOcount += capitals.size();
-	glBufferData(GL_ARRAY_BUFFER, VBOcount * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
-	float *mapV = (float*) glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	// Capitals text
+	const GLsizei VBOtextOff = VBOcount;
+	window.charactersCount = 0;
+	for(const string &name : capitals | views::elements<0>)
+		window.charactersCount += 6 * name.size();
+	VBOcount += 4 * window.charactersCount;
+
+	// Fill VBO
+	glNamedBufferData(VBO, VBOcount * 2 * sizeof(float), nullptr, GL_STATIC_DRAW);
+	float *mapV = (float*) glMapNamedBuffer(VBO, GL_WRITE_ONLY);
 	for(const auto &roads : roads) {
 		for(const auto &r : roads) {
 			const int n = r.size();
@@ -305,17 +317,60 @@ int main() {
 			*(mapV++) = lat2Float(nodes[r[i]].lat);
 		}
 	}
-	for(const int64_t id : capitals) {
+	for(const int64_t id : capitals | views::elements<1>) {
 		*(mapV++) = lon2Float(nodes[id].lon);
 		*(mapV++) = lat2Float(nodes[id].lat);
 	}
-	glUnmapBuffer(GL_ARRAY_BUFFER);
+	for(const auto &[name, id] : capitals) {
+		if(name.empty()) continue;
+		const float txtCenterX = lon2Float(nodes[id].lon);
+		const float txtCenterY = lat2Float(nodes[id].lat);
+		float offX = 0.f, offY = 1e9f;
+		for(int c : name) {
+			const auto &pc = window.atlas.charPositions[c - Font::firstChar];
+			offY = min(offY, pc.yoff);
+			offX += pc.xadvance;
+		}
+		const auto &pc0 = window.atlas.charPositions[name[0] - Font::firstChar];
+		const auto &pc1 = window.atlas.charPositions[name.back() - Font::firstChar];
+		offX = - (pc0.xoff + offX - pc1.xadvance + pc1.xoff + pc1.x1 - pc1.x0) / 2.f;
+		offY -= 6.f;
+		for(int c : name) {
+			const auto &pc = window.atlas.charPositions[c - Font::firstChar];
+			// TODO: use EBO
+			for(const auto &[dx, dy] : {make_pair(0.f, 0.f), {0.f, 1.f}, {1.f, 1.f}, {0.f, 0.f}, {1.f, 1.f}, {1.f, 0.f}}) {
+				*(mapV++) = txtCenterX;
+				*(mapV++) = txtCenterY;
+				*(mapV++) = offX + pc.xoff + dx*(pc.x1-pc.x0);
+				*(mapV++) = offY - pc.yoff - dy*(pc.y1-pc.y0);
+				*(mapV++) = (pc.x0 + (-0.03 + 1.06*dx)*(pc.x1-pc.x0)) / window.atlas.width;
+				*(mapV++) = (pc.y0 + (-0.03 + 1.06*dy)*(pc.y1-pc.y0)) / window.atlas.height;
+				*(mapV++) = (pc.x0 +   (0.05 + 0.9*dx)*(pc.x1-pc.x0)) / window.atlas.width;
+				*(mapV++) = (pc.y0 +   (0.05 + 0.9*dy)*(pc.y1-pc.y0)) / window.atlas.height;
+			}
+			offX += pc.xadvance;
+		}
+	}
+	glUnmapNamedBuffer(VBO);
 
 	// VAO
 	glGenVertexArrays(1, &window.VAO);
 	glBindVertexArray(window.VAO);
 	glVertexAttribPointer(window.progs.main.get_p(), 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(window.progs.main.get_p());
+	glGenVertexArrays(1, &window.VAOtext);
+
+	// VAOtext
+	glGenVertexArrays(1, &window.VAOtext);
+	glBindVertexArray(window.VAOtext);
+	glVertexAttribPointer(window.progs.text.get_txtCenter(), 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<const void*>(VBOtextOff*2*sizeof(float)));
+	glEnableVertexAttribArray(window.progs.text.get_txtCenter());
+	glVertexAttribPointer(window.progs.text.get_offset(), 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<const void*>((VBOtextOff+1)*2*sizeof(float)));
+	glEnableVertexAttribArray(window.progs.text.get_offset());
+	glVertexAttribPointer(window.progs.text.get_vUV(), 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<const void*>((VBOtextOff+2)*2*sizeof(float)));
+	glEnableVertexAttribArray(window.progs.text.get_vUV());
+	glVertexAttribPointer(window.progs.text.get_vUV2(), 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), reinterpret_cast<const void*>((VBOtextOff+3)*2*sizeof(float)));
+	glEnableVertexAttribArray(window.progs.text.get_vUV2());
 	glBindVertexArray(0);
 
 	window.start();

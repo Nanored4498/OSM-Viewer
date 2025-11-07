@@ -8,6 +8,7 @@
 #include <GLFW/glfw3.h>
 #include "glad/gl.h"
 
+#include "font.h"
 #include "programs/generated/programs.h"
 
 struct Window {
@@ -24,8 +25,9 @@ struct Window {
 	int width = 800;
 	int height = 600;
 
-	GLuint VAO;
+	GLuint VAO, VAOtext;
 	Programs progs;
+	Font::Atlas atlas;
 
 	float centerX, centerY, scale;
 	float anchorX, anchorY;
@@ -40,4 +42,5 @@ struct Window {
 	std::vector<Road> roads;
 	GLint capitalsFirst;
 	GLsizei capitalsCount;
+	GLsizei charactersCount;
 };

@@ -1,2 +1,3 @@
 main main main
 capital main capital
+text text text

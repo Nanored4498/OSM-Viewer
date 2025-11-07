@@ -9,7 +9,6 @@
 #include <iostream>
 #include <ranges>
 
-#include "font.h"
 #include "utils.h"
 
 using namespace std;
@@ -86,6 +85,11 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	glfwGetFramebufferSize(window, &width, &height);
 	frameBufferSizeCallback(window, width, height);
 
+	// Use alpha
+	glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendEquation(GL_FUNC_ADD);
+
 	// create program
 	progs.init();
 
@@ -95,16 +99,17 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	scale = 2.f * min(width/(x1 - x0), height/(y1 - y0));
 
 	// Load fonts
-	Font::Atlas atlas = Font::getTTFAtlas(FONT_DIR "/Roboto-Medium.ttf", 21.f);
+	atlas = Font::getTTFAtlas(FONT_DIR "/Roboto-Medium.ttf", 22.f);
 	GLuint fontAtlasTexture;
 	glGenTextures(1, &fontAtlasTexture);
+	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, fontAtlasTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlas.width, atlas.height, 0, GL_RED, GL_UNSIGNED_BYTE, atlas.img.get());
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glBindTexture(GL_TEXTURE_2D, 0);
+	atlas.img.~unique_ptr();
 
 	// TODO: to try
 	// glEnable(GL_LINE_SMOOTH);
@@ -139,6 +144,15 @@ void Window::start() {
 		progs.capital.set_scale(scale/width, scale/height);
 		glPointSize(12.f);
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
+
+		glBindVertexArray(VAOtext);
+
+		progs.text.use();
+		progs.text.set_center(centerX, centerY);
+		progs.text.set_scale(scale/width, scale/height);
+		progs.text.set_txtScale(2.f/width, 2.f/height);
+		progs.text.set_fontAtlas(0);
+		glDrawArrays(GL_TRIANGLES, 0, charactersCount);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

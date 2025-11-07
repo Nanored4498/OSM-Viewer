@@ -1,3 +1,7 @@
+// Copyright (C) 2025, Coudert--Osmont Yoann
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// See <https://www.gnu.org/licenses/>
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -10,7 +14,8 @@ using namespace std;
 
 enum Type {
 	VEC2,
-	VEC3
+	VEC3,
+	SAMPLER2D
 };
 
 struct Prog {
@@ -22,6 +27,7 @@ struct Prog {
 Type getType(const string &s) {
 	if(s == "vec2") return Type::VEC2;
 	if(s == "vec3") return Type::VEC3;
+	if(s == "sampler2D") return Type::SAMPLER2D;
 	cerr << "Unknown type: " << s << endl;
 	exit(1);
 }
@@ -125,10 +131,13 @@ int main(int argc, char* argv[]) {
 			Hfile << "\t\tinline void set_" << name << '(';
 			switch(t) {
 			case Type::VEC2:
-				Hfile << "float x, float y) { glUniform2f(" << name << ", x, y); }\n";
+				Hfile << "GLfloat x, GLfloat y) { glUniform2f(" << name << ", x, y); }\n";
 				break;
 			case Type::VEC3:
-				Hfile << "float x, float y, float z) { glUniform3f(" << name << ", x, y, z); }\n";
+				Hfile << "GLfloat x, GLfloat y, GLfloat z) { glUniform3f(" << name << ", x, y, z); }\n";
+				break;
+			case Type::SAMPLER2D:
+				Hfile << "GLint i) { glUniform1i(" << name << ", i); }\n";
 				break;
 			default:
 				cerr << "Not implemented (0)" << endl;
