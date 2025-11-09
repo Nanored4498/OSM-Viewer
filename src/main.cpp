@@ -320,9 +320,7 @@ int main() {
 	// VAO
 	glCreateVertexArrays(1, &window.VAO);
 	glVertexArrayVertexBuffer(window.VAO, 0, VBO, 0, 2 * sizeof(float));
-	glEnableVertexArrayAttrib(window.VAO, window.progs.main.get_p());
-	glVertexArrayAttribFormat(window.VAO, window.progs.main.get_p(), 2, GL_FLOAT, GL_FALSE, 0);
-	glVertexArrayAttribBinding(window.VAO, window.progs.main.get_p(), 0);
+	window.progs.main.bind_p(window.VAO, 0, 0);
 
 	// Capitals text SSBO
 	glCreateBuffers(1, &window.textSSBO);

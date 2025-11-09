@@ -152,7 +152,7 @@ void Window::start() {
 		progs.text.set_center(centerX, centerY);
 		progs.text.set_scale(scale/width, scale/height);
 		progs.text.set_txtScale(2.f/width, 2.f/height);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, textSSBO);
+		progs.text.bind_ssbo(textSSBO);
 		glDrawArrays(GL_TRIANGLES, 0, 6*charactersCount);
 
 		glfwSwapBuffers(window);

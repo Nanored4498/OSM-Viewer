@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // See <https://www.gnu.org/licenses/>
 
+#include <concepts>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -19,6 +20,7 @@ using namespace std;
 struct Attribute {
 	string name;
 	GLuint index;
+	GLuint type;
 };
 
 struct Uniform {
@@ -27,10 +29,16 @@ struct Uniform {
 	GLuint type;
 };
 
+struct Buffer {
+	string name;
+	GLuint binding;
+};
+
 struct Prog {
 	string name, vertName, fragName;
 	vector<Attribute> attributes;
 	vector<Uniform> uniforms;
+	vector<Buffer> buffers;
 };
 
 static GLchar infoLog[1024];
@@ -56,6 +64,50 @@ static void compileShaderFile(GLuint shader, const char* fileName) {
 		exit(1);
 	}
 }
+
+template<typename T>
+concept RessourceType = requires(T x) {
+	{ x.name } -> same_as<string&>;
+};
+
+template<GLenum inteface, GLenum... properties, RessourceType Ressource, invocable<Ressource&, GLint*> Fun>
+void getRessources(GLuint prog, vector<Ressource> &ressources, const Fun &f) {
+	GLint num = 0;
+	glGetProgramInterfaceiv(prog, inteface, GL_ACTIVE_RESOURCES, &num);
+	ressources.resize(num);
+	for(GLint i = 0; i < num; ++i) {
+		const GLenum props[] {GL_NAME_LENGTH, properties...};
+		GLint vals[std::size(props)];
+		glGetProgramResourceiv(prog, inteface, i, std::size(props), props, std::size(props), nullptr, vals);
+		Ressource &r = ressources[i];
+		r.name.resize(vals[0]);
+		if(!r.name.empty()) {
+			glGetProgramResourceName(prog, inteface, i, r.name.size(), nullptr, r.name.data());
+			r.name.pop_back();
+		}
+		f(r, vals);
+	}
+}
+
+static const char* getTypeName(GLuint type) {
+	switch(type) {
+	case GL_FLOAT_VEC2:
+		return "GL_FLOAT";
+	default:
+		cerr << "Unknown type: " << hex << type << dec << " (" << __FILE__ << ':' << __LINE__ << ")\n";
+		exit(1);
+	}
+};
+
+static GLuint getTypeSize(GLuint type) {
+	switch(type) {
+	case GL_FLOAT_VEC2:
+		return 2;
+	default:
+		cerr << "Unknown type: " << hex << type << dec << " (" << __FILE__ << ':' << __LINE__ << ")\n";
+		exit(1);
+	}
+};
 
 int main(int argc, char* argv[]) {
 	if(argc != 4) {
@@ -116,41 +168,23 @@ int main(int argc, char* argv[]) {
 			cerr << "Failed to link program: \n" << infoLog;
 			exit(1);
 		}
-		GLint numAttribs = 0, numUniforms = 0;
-
-		glGetProgramInterfaceiv(prg, GL_PROGRAM_INPUT, GL_ACTIVE_RESOURCES, &numAttribs);
-		prog.attributes.resize(numAttribs);
-		for(GLint i = 0; i < numAttribs; ++i) {
-			const GLenum props[] {GL_NAME_LENGTH, GL_LOCATION};
-			GLint vals[std::size(props)];
-			glGetProgramResourceiv(prg, GL_PROGRAM_INPUT, i, std::size(props), props, std::size(props), nullptr, vals);
-			Attribute &a = prog.attributes[i];
-			a.name.resize(vals[0]);
+		getRessources<GL_PROGRAM_INPUT, GL_LOCATION, GL_TYPE>(prg, prog.attributes, [](Attribute &a, GLint* vals) {
 			a.index = vals[1];
-			glGetProgramResourceName(prg, GL_PROGRAM_INPUT, i, a.name.size(), nullptr, a.name.data());
-			a.name.pop_back();
-		}
+			a.type = vals[2];
+		});
 		for(int i = 0; i < (int) prog.attributes.size();) {
 			if(prog.attributes[i].name == "gl_VertexID") {
 				prog.attributes[i] = move(prog.attributes.back());
 				prog.attributes.pop_back();
 			} else ++i;
 		}
-
-		glGetProgramInterfaceiv(prg, GL_UNIFORM, GL_ACTIVE_RESOURCES, &numUniforms);
-		prog.uniforms.resize(numUniforms);
-		for(GLint i = 0; i < numUniforms; ++i) {
-			const GLenum props[] {GL_NAME_LENGTH, GL_LOCATION, GL_TYPE};
-			GLint vals[std::size(props)];
-			glGetProgramResourceiv(prg, GL_UNIFORM, i, std::size(props), props, std::size(props), nullptr, vals);
-			Uniform &u = prog.uniforms[i];
-			u.name.resize(vals[0]);
+		getRessources<GL_UNIFORM, GL_LOCATION, GL_TYPE>(prg, prog.uniforms, [](Uniform &u, GLint* vals) {
 			u.index = vals[1];
 			u.type = vals[2];
-			glGetProgramResourceName(prg, GL_UNIFORM, i, u.name.size(), nullptr, u.name.data());
-			u.name.pop_back();
-		}
-
+		});
+		getRessources<GL_SHADER_STORAGE_BLOCK, GL_BUFFER_BINDING>(prg, prog.buffers, [](Buffer &b, GLint* vals) {
+			b.binding = vals[1];
+		});
 		glDeleteProgram(prg);
 	}
 	for(const GLuint &shader : vertShaders | views::elements<1>) glDeleteShader(shader);
@@ -169,11 +203,24 @@ int main(int argc, char* argv[]) {
 	Hfile << "\t\tfriend Programs;\n";
 	Hfile << "\t\tGLuint prog;\n";
 	Hfile << "\t\tvoid init(GLuint vertexShader, GLuint fragmentShader);\n";
+	Hfile << "\n\t\ttemplate<GLuint attribIndex, GLint size, GLenum type>\n";
+	Hfile << "\t\tvoid __bind(GLuint VAO, GLuint bindingIndex, GLuint offset) const {\n";
+	Hfile << "\t\t\tglEnableVertexArrayAttrib(VAO, attribIndex);\n";
+	Hfile << "\t\t\tglVertexArrayAttribBinding(VAO, attribIndex, bindingIndex);\n";
+	Hfile << "\t\t\tglVertexArrayAttribFormat(VAO, attribIndex, size, type, GL_FALSE, offset);\n";
+	Hfile << "\t\t}\n";
 	Hfile << "\t};\n";
 	for(const Prog &prog : progs) {
 		Hfile << "\n\tstruct : Program {\n";
 		for(const Attribute &a : prog.attributes) {
-			Hfile << "\t\tinline GLint get_" << a.name << "() const { return " << a.index << "; }\n";
+			Hfile << "\t\tinline void bind_" << a.name << "(GLuint VAO, GLuint bindingIndex, GLuint offset) const {\n";
+			Hfile << "\t\t\t__bind<" << a.index << ", " << getTypeSize(a.type) << ", " << getTypeName(a.type) << ">(VAO, bindingIndex, offset);\n";
+			Hfile << "\t\t}\n";
+		}
+		for(const Buffer &b : prog.buffers) {
+			Hfile << "\t\tinline void bind_" << b.name << "(GLuint SSBO) const {\n";
+			Hfile << "\t\t\tglBindBufferBase(GL_SHADER_STORAGE_BUFFER, " << b.binding << ", SSBO);\n";
+			Hfile << "\t\t}\n";
 		}
 		for(const Uniform &u : prog.uniforms) {
 			Hfile << "\t\tinline void set_" << u.name << '(';
