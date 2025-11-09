@@ -213,15 +213,17 @@ static void getGlyphRects(const TTFData &info, const float fontSize, GlyphRect *
 	}
 }
 
-// TODO: implement a new packing algo
 static Atlas packRects(GlyphRect *rects) {
 	constexpr int padding = 1;
 	Atlas atlas;
 	atlas.width = 256;
-	atlas.height = 768;
-	atlas.img.reset(new uint8_t[atlas.width * atlas.height]());
 	int x = padding, y = padding, rowHeight = 0;
-	for(uint32_t i = 0; i < charCount; ++i) {
+	uint32_t order[charCount];
+	for(uint32_t i = 0; i < charCount; ++i) order[i] = i;
+	sort(order, order+charCount, [&](uint32_t i, uint32_t j) {
+		return rects[i].h < rects[j].h;
+	});
+	for(uint32_t i : order) {
 		if(rects[i].missing) continue;
 		if(x + rects[i].w + padding > atlas.width) {
 			x = padding;
@@ -233,8 +235,8 @@ static Atlas packRects(GlyphRect *rects) {
 		x += rects[i].w + padding;
 		rowHeight = max(rowHeight, rects[i].h);
 	}
-	if(y + rowHeight + padding > atlas.height)
-		THROW_ERROR("atlas image is too small to pack all glyphs");
+	atlas.height = y + rowHeight + padding;
+	atlas.img.reset(new uint8_t[atlas.width * atlas.height]());
 	return atlas;
 }
 

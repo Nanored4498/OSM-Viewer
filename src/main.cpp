@@ -360,6 +360,7 @@ int main() {
 			offX += cp.xadvance;
 		}
 	}
+	glUnmapNamedBuffer(window.textSSBO);
 
 	window.start();
 

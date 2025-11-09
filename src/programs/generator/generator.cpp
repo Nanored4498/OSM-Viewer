@@ -10,26 +10,51 @@
 #include <unordered_map>
 #include <vector>
 
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+#include "glad/gl.h"
+
 using namespace std;
 
-enum Type {
-	VEC2,
-	VEC3,
-	SAMPLER2D
+struct Attribute {
+	string name;
+	GLuint index;
+};
+
+struct Uniform {
+	string name;
+	GLuint index;
+	GLuint type;
 };
 
 struct Prog {
 	string name, vertName, fragName;
-	vector<string> attributes;
-	vector<pair<Type, string>> uniforms;
+	vector<Attribute> attributes;
+	vector<Uniform> uniforms;
 };
 
-Type getType(const string &s) {
-	if(s == "vec2") return Type::VEC2;
-	if(s == "vec3") return Type::VEC3;
-	if(s == "sampler2D") return Type::SAMPLER2D;
-	cerr << "Unknown type: " << s << endl;
-	exit(1);
+static GLchar infoLog[1024];
+
+static void compileShaderFile(GLuint shader, const char* fileName) {
+	ifstream file(fileName, ios::ate);
+	if(!file) {
+		cerr << "Failed to open shader file: " << fileName << '\n';
+		exit(1);
+	}
+	const GLint size = (GLint) file.tellg();
+	char* src = new char[size]; // delete[] ???
+	file.seekg(0);
+	file.read(src, size);
+	file.close();
+	glShaderSource(shader, 1, &src, &size);
+	glCompileShader(shader);
+	GLint succes;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &succes);
+	if(!succes) {
+		glGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);
+		cerr << "Failed to compile shader: " << fileName << "\n" << infoLog;
+		exit(1);
+	}
 }
 
 int main(int argc, char* argv[]) {
@@ -41,7 +66,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	vector<Prog> progs;
-	unordered_map<string, vector<int>> vertNames, fragNames;
+	unordered_map<string, GLuint> vertShaders, fragShaders;
 	
 	// Read list
 	ifstream listFile(argv[1]);
@@ -51,8 +76,8 @@ int main(int argc, char* argv[]) {
 	}
 	string progName, vertName, fragName;
 	while(listFile >> progName >> vertName >> fragName) {
-		vertNames[vertName].push_back(progs.size());
-		fragNames[fragName].push_back(progs.size());
+		vertShaders.emplace(vertName, 0);
+		fragShaders.emplace(fragName, 0);
 		Prog &prog = progs.emplace_back();
 		prog.name = move(progName);
 		prog.vertName = move(vertName);
@@ -60,53 +85,76 @@ int main(int argc, char* argv[]) {
 	}
 	listFile.close();
 
+	if(!glfwInit()) {
+		cerr << "Failed to init glfw!\n";
+		exit(1);
+	}
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	GLFWwindow *window = glfwCreateWindow(1, 1, "Program Generator", nullptr, nullptr);
+	glfwMakeContextCurrent(window);
+	gladLoadGL(glfwGetProcAddress);
+
 	// Search for attributes and uniforms
 	const filesystem::path shaderDir = argv[2];
-	for(const auto &[shaderNames, ext] : {make_pair(&vertNames, ".vert"), {&fragNames, ".frag"}}) {
-		const bool readAtt = ext[1] == 'v';
-		for(const auto &[name, inds] : *shaderNames) {
-			ifstream shader(shaderDir / (name + ext));
-			if(!shader) {
-				cerr << "Can't find vertex shader " << vertName << endl;
-				exit(1);
-			}
-			string line;
-			while(getline(shader, line)) {
-				istringstream iss(line);
-				string word;
-				iss >> word;
-				if(word == "uniform") {
-					iss >> word;
-					Type t = getType(word);
-					iss >> word;
-					if(word.empty()) continue;
-					if(word.back() == ';') {
-						word.pop_back();
-						if(word.empty()) continue;
-					}
-					for(int i : inds) progs[i].uniforms.emplace_back(t, word);
-				} else if(readAtt && word == "layout") {
-					iss >> word;
-					if(word != "(location") continue;
-					iss >> word;
-					if(word != "=") continue;
-					iss >> word;
-					if(word.empty() || word.back() != ')') continue;
-					iss >> word;
-					if(word != "in") continue;
-					iss >> word;
-					getType(word);
-					iss >> word;
-					if(word.empty()) continue;
-					if(word.back() == ';') {
-						word.pop_back();
-						if(word.empty()) continue;
-					}
-					for(int i : inds) progs[i].attributes.emplace_back(word);
-				}
-			}
-		}
+	for(auto &[name, shader] : vertShaders) {
+		shader = glCreateShader(GL_VERTEX_SHADER);
+		compileShaderFile(shader, (shaderDir / (name + ".vert")).c_str());
 	}
+	for(auto &[name, shader] : fragShaders) {
+		shader = glCreateShader(GL_FRAGMENT_SHADER);
+		compileShaderFile(shader, (shaderDir / (name + ".frag")).c_str());
+	}
+	for(Prog &prog : progs) {
+		const GLuint prg = glCreateProgram();
+		glAttachShader(prg, vertShaders[prog.vertName]);
+		glAttachShader(prg, fragShaders[prog.fragName]);
+		glLinkProgram(prg);
+		GLint succes;
+		glGetProgramiv(prg, GL_LINK_STATUS, &succes);
+		if(!succes) {
+			glGetProgramInfoLog(prg, sizeof(infoLog), nullptr, infoLog);
+			cerr << "Failed to link program: \n" << infoLog;
+			exit(1);
+		}
+		GLint numAttribs = 0, numUniforms = 0;
+
+		glGetProgramInterfaceiv(prg, GL_PROGRAM_INPUT, GL_ACTIVE_RESOURCES, &numAttribs);
+		prog.attributes.resize(numAttribs);
+		for(GLint i = 0; i < numAttribs; ++i) {
+			const GLenum props[] {GL_NAME_LENGTH, GL_LOCATION};
+			GLint vals[std::size(props)];
+			glGetProgramResourceiv(prg, GL_PROGRAM_INPUT, i, std::size(props), props, std::size(props), nullptr, vals);
+			Attribute &a = prog.attributes[i];
+			a.name.resize(vals[0]);
+			a.index = vals[1];
+			glGetProgramResourceName(prg, GL_PROGRAM_INPUT, i, a.name.size(), nullptr, a.name.data());
+			a.name.pop_back();
+		}
+		for(int i = 0; i < (int) prog.attributes.size();) {
+			if(prog.attributes[i].name == "gl_VertexID") {
+				prog.attributes[i] = move(prog.attributes.back());
+				prog.attributes.pop_back();
+			} else ++i;
+		}
+
+		glGetProgramInterfaceiv(prg, GL_UNIFORM, GL_ACTIVE_RESOURCES, &numUniforms);
+		prog.uniforms.resize(numUniforms);
+		for(GLint i = 0; i < numUniforms; ++i) {
+			const GLenum props[] {GL_NAME_LENGTH, GL_LOCATION, GL_TYPE};
+			GLint vals[std::size(props)];
+			glGetProgramResourceiv(prg, GL_UNIFORM, i, std::size(props), props, std::size(props), nullptr, vals);
+			Uniform &u = prog.uniforms[i];
+			u.name.resize(vals[0]);
+			u.index = vals[1];
+			u.type = vals[2];
+			glGetProgramResourceName(prg, GL_UNIFORM, i, u.name.size(), nullptr, u.name.data());
+			u.name.pop_back();
+		}
+
+		glDeleteProgram(prg);
+	}
+	for(const GLuint &shader : vertShaders | views::elements<1>) glDeleteShader(shader);
+	for(const GLuint &shader : fragShaders | views::elements<1>) glDeleteShader(shader);
 
 	const filesystem::path outputDir = argv[3];
 
@@ -124,39 +172,25 @@ int main(int argc, char* argv[]) {
 	Hfile << "\t};\n";
 	for(const Prog &prog : progs) {
 		Hfile << "\n\tstruct : Program {\n";
-		for(const auto &name : prog.attributes) {
-			Hfile << "\t\tinline GLint get_" << name << "() const { return " << name << "; }\n";
+		for(const Attribute &a : prog.attributes) {
+			Hfile << "\t\tinline GLint get_" << a.name << "() const { return " << a.index << "; }\n";
 		}
-		for(const auto &[t, name] : prog.uniforms) {
-			Hfile << "\t\tinline void set_" << name << '(';
-			switch(t) {
-			case Type::VEC2:
-				Hfile << "GLfloat x, GLfloat y) { glUniform2f(" << name << ", x, y); }\n";
+		for(const Uniform &u : prog.uniforms) {
+			Hfile << "\t\tinline void set_" << u.name << '(';
+			switch(u.type) {
+			case GL_FLOAT_VEC2:
+				Hfile << "GLfloat x, GLfloat y) { glUniform2f(" << u.index << ", x, y); }\n";
 				break;
-			case Type::VEC3:
-				Hfile << "GLfloat x, GLfloat y, GLfloat z) { glUniform3f(" << name << ", x, y, z); }\n";
+			case GL_FLOAT_VEC3:
+				Hfile << "GLfloat x, GLfloat y, GLfloat z) { glUniform3f(" << u.index << ", x, y, z); }\n";
 				break;
-			case Type::SAMPLER2D:
-				Hfile << "GLint i) { glUniform1i(" << name << ", i); }\n";
+			case GL_SAMPLER_2D:
+				Hfile << "GLint i) { glUniform1i(" << u.index << ", i); }\n";
 				break;
 			default:
-				cerr << "Not implemented (0)" << endl;
+				cerr << "Unknown uniform type: " << u.name << " : " << hex << u.type << dec << " (" << __FILE__ << ':' << __LINE__ << ")\n";
 				exit(1);
 			}
-		}
-		Hfile << "\tprotected:\n";
-		Hfile << "\t\tfriend Programs;\n";
-		if(!prog.attributes.empty()) {
-			Hfile << "\t\tGLint";
-			for(int i = 0; i < (int) prog.attributes.size(); ++i)
-				Hfile << (i ? ", " : " ") << prog.attributes[i];
-			Hfile << ";\n";
-		}
-		if(!prog.uniforms.empty()) {
-			Hfile << "\t\tGLint";
-			for(int i = 0; i < (int) prog.uniforms.size(); ++i)
-				Hfile << (i ? ", " : " ") << prog.uniforms[i].second;
-			Hfile << ";\n";
 		}
 		Hfile << "\t} " << prog.name << ";\n";
 	}
@@ -178,11 +212,12 @@ int main(int argc, char* argv[]) {
 	Cfile << "\t\texit(1);\n";
 	Cfile << "\t}\n";
 	Cfile << "\tconst GLint size = (GLint) file.tellg();\n";
-	Cfile << "\tchar* src = new char[size]; // delete[] ???\n";
+	Cfile << "\tchar* src = new char[size];\n";
 	Cfile << "\tfile.seekg(0);\n";
 	Cfile << "\tfile.read(src, size);\n";
 	Cfile << "\tfile.close();\n";
 	Cfile << "\tglShaderSource(shader, 1, &src, &size);\n";
+	Cfile << "\tdelete[] src;\n";
 	Cfile << "\tglCompileShader(shader);\n";
 	Cfile << "\tGLint succes;\n";
 	Cfile << "\tglGetShaderiv(shader, GL_COMPILE_STATUS, &succes);\n";
@@ -208,26 +243,20 @@ int main(int argc, char* argv[]) {
 	Cfile << "}\n";
 
 	Cfile << "\nvoid Programs::init() {\n";
-	for(const auto &name : vertNames | views::elements<0>) {
+	for(const auto &name : vertShaders | views::elements<0>) {
 		Cfile << "\tconst GLuint vert_" << name << " = glCreateShader(GL_VERTEX_SHADER);\n";
 		Cfile << "\tcompileShaderFile(vert_" << name << ", SHADER_DIR \"/" << name << ".vert\");\n";
 	}
-	for(const auto &name : fragNames | views::elements<0>) {
+	for(const auto &name : fragShaders | views::elements<0>) {
 		Cfile << "\tconst GLuint frag_" << name << " = glCreateShader(GL_FRAGMENT_SHADER);\n";
 		Cfile << "\tcompileShaderFile(frag_" << name << ", SHADER_DIR \"/" << name << ".frag\");\n";
 	}
 	for(const Prog &prog : progs)
 		Cfile << "\t" << prog.name << ".init(vert_" << prog.vertName << ", frag_" << prog.fragName << ");\n";
-	for(const auto &name : vertNames | views::elements<0>)
+	for(const auto &name : vertShaders | views::elements<0>)
 		Cfile << "\tglDeleteShader(vert_" << name << ");\n";
-	for(const auto &name : fragNames | views::elements<0>)
+	for(const auto &name : fragShaders | views::elements<0>)
 		Cfile << "\tglDeleteShader(frag_" << name << ");\n";
-	for(const Prog &prog : progs) {
-		for(const auto &name : prog.attributes)
-			Cfile << "\t" << prog.name << '.' << name << " = glGetAttribLocation(" << prog.name << ".prog, \"" << name << "\");\n";
-		for(const auto &name : prog.uniforms | views::elements<1>)
-			Cfile << "\t" << prog.name << '.' << name << " = glGetUniformLocation(" << prog.name << ".prog, \"" << name << "\");\n";
-	}
 	Cfile << "}\n";
 	Cfile.close();
 
