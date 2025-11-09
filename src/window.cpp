@@ -112,6 +112,13 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	progs.text.set_fontAtlas(0);
 	atlas.img.~unique_ptr();
 
+	// UBO
+	glCreateBuffers(1, &UBO);
+	glNamedBufferStorage(UBO, 4 * sizeof(float), nullptr, GL_DYNAMIC_STORAGE_BIT);
+	progs.main.bind_Camera(UBO);
+	progs.capital.bind_Camera(UBO);
+	progs.text.bind_Camera(UBO);
+
 	// TODO: to try
 	// glEnable(GL_LINE_SMOOTH);
 	// glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
@@ -120,16 +127,17 @@ void Window::init(float x0, float x1, float y0, float y1) {
 
 void Window::start() {
 	while(!glfwWindowShouldClose(window)) {
+		// Clear
 		glClearColor(0.945f, 0.933f, 0.910f, 1.f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		// TODO: Use UBO
+		// Set UBO
+		const float UBOdata[4] {centerX, centerY, scale/width, scale/height};
+		glNamedBufferSubData(UBO, 0, sizeof(UBOdata), UBOdata);
 
+		// Render roads and capitals
 		glBindVertexArray(VAO);
-
 		progs.main.use();
-		progs.main.set_center(centerX, centerY);
-		progs.main.set_scale(scale/width, scale/height);
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
 			if(!r.border) continue;
@@ -141,16 +149,12 @@ void Window::start() {
 			progs.main.set_color(r.r, r.g, r.b);
 			glDrawArrays(GL_LINES, r.first, r.count);
 		}
-
 		progs.capital.use();
-		progs.capital.set_center(centerX, centerY);
-		progs.capital.set_scale(scale/width, scale/height);
 		glPointSize(12.f);
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
 
+		// Render text
 		progs.text.use();
-		progs.text.set_center(centerX, centerY);
-		progs.text.set_scale(scale/width, scale/height);
 		progs.text.set_txtScale(2.f/width, 2.f/height);
 		progs.text.bind_ssbo(textSSBO);
 		glDrawArrays(GL_TRIANGLES, 0, 6*charactersCount);

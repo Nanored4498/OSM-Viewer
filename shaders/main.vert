@@ -3,11 +3,11 @@
 // See <https://www.gnu.org/licenses/>
 
 #version 460
+#extension GL_ARB_shading_language_include : require
+
+#include "/camera.glsl"
 
 layout (location = 0) in vec2 p;
-
-uniform vec2 center;
-uniform vec2 scale;
 
 void main() {
 	gl_Position = vec4(scale*(p - center), 0., 1.);

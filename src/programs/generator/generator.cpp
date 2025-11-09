@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <ranges>
+#include <regex>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
@@ -34,13 +35,20 @@ struct Buffer {
 	GLuint binding;
 };
 
+struct UBO {
+	string name;
+	GLuint binding;
+};
+
 struct Prog {
 	string name, vertName, fragName;
 	vector<Attribute> attributes;
 	vector<Uniform> uniforms;
 	vector<Buffer> buffers;
+	vector<UBO> ubos;
 };
 
+static filesystem::path shaderDir;
 static GLchar infoLog[1024];
 
 static void compileShaderFile(GLuint shader, const char* fileName) {
@@ -50,12 +58,33 @@ static void compileShaderFile(GLuint shader, const char* fileName) {
 		exit(1);
 	}
 	const GLint size = (GLint) file.tellg();
-	char* src = new char[size]; // delete[] ???
+	char* src = new char[size];
 	file.seekg(0);
 	file.read(src, size);
 	file.close();
+	const regex includeRegex(R"(#include\s+[\"<]/(.*)[\">])");
+	cmatch match;
+	const char* search_src = src;
+	while(regex_search(search_src, match, includeRegex)) {
+		if(!glIsNamedStringARB(match[1].length()+1, match[1].first-1)) {
+			ifstream includeFile(shaderDir / match[1].str(), ios::ate);
+			if(!includeFile) {
+				cerr << "Failed to open shader include file: " << (shaderDir / match[1].str()) << '\n';
+				exit(1);
+			}
+			const GLint includeSize = (GLint) includeFile.tellg();
+			char* includeSrc = new char[includeSize];
+			includeFile.seekg(0);
+			includeFile.read(includeSrc, includeSize);
+			includeFile.close();
+			glNamedStringARB(GL_SHADER_INCLUDE_ARB, match[1].length()+1, match[1].first-1, includeSize, includeSrc);
+			delete[] includeSrc;
+		}
+		search_src = match.suffix().first;
+	}
 	glShaderSource(shader, 1, &src, &size);
-	glCompileShader(shader);
+	delete[] src;
+	glCompileShaderIncludeARB(shader, 0, nullptr, nullptr);
 	GLint succes;
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &succes);
 	if(!succes) {
@@ -146,8 +175,9 @@ int main(int argc, char* argv[]) {
 	glfwMakeContextCurrent(window);
 	gladLoadGL(glfwGetProcAddress);
 
+
 	// Search for attributes and uniforms
-	const filesystem::path shaderDir = argv[2];
+	shaderDir = argv[2];
 	for(auto &[name, shader] : vertShaders) {
 		shader = glCreateShader(GL_VERTEX_SHADER);
 		compileShaderFile(shader, (shaderDir / (name + ".vert")).c_str());
@@ -182,8 +212,17 @@ int main(int argc, char* argv[]) {
 			u.index = vals[1];
 			u.type = vals[2];
 		});
+		for(int i = 0; i < (int) prog.uniforms.size();) {
+			if(prog.uniforms[i].index == (GLuint)-1) {
+				prog.uniforms[i] = move(prog.uniforms.back());
+				prog.uniforms.pop_back();
+			} else ++i;
+		}
 		getRessources<GL_SHADER_STORAGE_BLOCK, GL_BUFFER_BINDING>(prg, prog.buffers, [](Buffer &b, GLint* vals) {
 			b.binding = vals[1];
+		});
+		getRessources<GL_UNIFORM_BLOCK, GL_BUFFER_BINDING>(prg, prog.ubos, [](UBO &u, GLint* vals) {
+			u.binding = vals[1];
 		});
 		glDeleteProgram(prg);
 	}
@@ -194,22 +233,27 @@ int main(int argc, char* argv[]) {
 
 	// Generate header
 	ofstream Hfile(outputDir / "programs.h");
-	Hfile << "#include \"glad/gl.h\"\n";
-	Hfile << "\nstruct Programs {\n";
-	Hfile << "\tvoid init();\n";
-	Hfile << "\n\tstruct Program {\n";
-	Hfile << "\t\tinline void use() { glUseProgram(prog); }\n";
-	Hfile << "\tprotected:\n";
-	Hfile << "\t\tfriend Programs;\n";
-	Hfile << "\t\tGLuint prog;\n";
-	Hfile << "\t\tvoid init(GLuint vertexShader, GLuint fragmentShader);\n";
-	Hfile << "\n\t\ttemplate<GLuint attribIndex, GLint size, GLenum type>\n";
-	Hfile << "\t\tvoid __bind(GLuint VAO, GLuint bindingIndex, GLuint offset) const {\n";
-	Hfile << "\t\t\tglEnableVertexArrayAttrib(VAO, attribIndex);\n";
-	Hfile << "\t\t\tglVertexArrayAttribBinding(VAO, attribIndex, bindingIndex);\n";
-	Hfile << "\t\t\tglVertexArrayAttribFormat(VAO, attribIndex, size, type, GL_FALSE, offset);\n";
-	Hfile << "\t\t}\n";
-	Hfile << "\t};\n";
+	Hfile << R"lim(#include "glad/gl.h"
+
+struct Programs {
+	void init();
+
+	struct Program {
+		inline void use() { glUseProgram(prog); }
+	protected:
+		friend Programs;
+		GLuint prog;
+		void init(GLuint vertexShader, GLuint fragmentShader);
+
+		template<GLuint attribIndex, GLint size, GLenum type>
+		void __bind(GLuint VAO, GLuint bindingIndex, GLuint offset) const {
+			glEnableVertexArrayAttrib(VAO, attribIndex);
+			glVertexArrayAttribBinding(VAO, attribIndex, bindingIndex);
+			glVertexArrayAttribFormat(VAO, attribIndex, size, type, GL_FALSE, offset);
+		}
+	};
+)lim";
+
 	for(const Prog &prog : progs) {
 		Hfile << "\n\tstruct : Program {\n";
 		for(const Attribute &a : prog.attributes) {
@@ -220,6 +264,11 @@ int main(int argc, char* argv[]) {
 		for(const Buffer &b : prog.buffers) {
 			Hfile << "\t\tinline void bind_" << b.name << "(GLuint SSBO) const {\n";
 			Hfile << "\t\t\tglBindBufferBase(GL_SHADER_STORAGE_BUFFER, " << b.binding << ", SSBO);\n";
+			Hfile << "\t\t}\n";
+		}
+		for(const UBO &u : prog.ubos) {
+			Hfile << "\t\tinline void bind_" << u.name << "(GLuint UBO) const {\n";
+			Hfile << "\t\t\tglBindBufferBase(GL_UNIFORM_BUFFER, " << u.binding << ", UBO);\n";
 			Hfile << "\t\t}\n";
 		}
 		for(const Uniform &u : prog.uniforms) {
@@ -246,48 +295,73 @@ int main(int argc, char* argv[]) {
 
 	// Generate CPP
 	ofstream Cfile(outputDir / "programs.cpp");
-	Cfile << "#include \"programs.h\"\n\n";
-	Cfile << "#include <iostream>\n\n";
-	Cfile << "#include <fstream>\n\n";
-	Cfile << "using namespace std;\n\n";
-	Cfile << "static GLchar infoLog[1024];\n";
+	Cfile << R"lim(#include "programs.h"
 
-	Cfile << "\nstatic void compileShaderFile(GLuint shader, const char* fileName) {\n";
-	Cfile << "\tifstream file(fileName, ios::ate);\n";
-	Cfile << "\tif(!file) {\n";
-	Cfile << "\t\tcerr << \"Failed to open shader file: \" << fileName << '\\n';\n";
-	Cfile << "\t\texit(1);\n";
-	Cfile << "\t}\n";
-	Cfile << "\tconst GLint size = (GLint) file.tellg();\n";
-	Cfile << "\tchar* src = new char[size];\n";
-	Cfile << "\tfile.seekg(0);\n";
-	Cfile << "\tfile.read(src, size);\n";
-	Cfile << "\tfile.close();\n";
-	Cfile << "\tglShaderSource(shader, 1, &src, &size);\n";
-	Cfile << "\tdelete[] src;\n";
-	Cfile << "\tglCompileShader(shader);\n";
-	Cfile << "\tGLint succes;\n";
-	Cfile << "\tglGetShaderiv(shader, GL_COMPILE_STATUS, &succes);\n";
-	Cfile << "\tif(!succes) {\n";
-	Cfile << "\t\tglGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);\n";
-	Cfile << "\t\tcerr << \"Failed to compile shader: \" << fileName << \"\\n\" << infoLog;\n";
-	Cfile << "\t\texit(1);\n";
-	Cfile << "\t}\n";
-	Cfile << "}\n";
+#include <iostream>
+#include <fstream>
+#include <regex>
 
-	Cfile << "\nvoid Programs::Program::init(GLuint vertexShader, GLuint fragmentShader) {\n";
-	Cfile << "\tprog = glCreateProgram();\n";
-	Cfile << "\tglAttachShader(prog, vertexShader);\n";
-	Cfile << "\tglAttachShader(prog, fragmentShader);\n";
-	Cfile << "\tglLinkProgram(prog);\n";
-	Cfile << "\tGLint succes;\n";
-	Cfile << "\tglGetProgramiv(prog, GL_LINK_STATUS, &succes);\n";
-	Cfile << "\tif(!succes) {\n";
-	Cfile << "\t\tglGetProgramInfoLog(prog, sizeof(infoLog), nullptr, infoLog);\n";
-	Cfile << "\t\tcerr << \"Failed to link program: \\n\" << infoLog;\n";
-	Cfile << "\t\texit(1);\n";
-	Cfile << "\t}\n";
-	Cfile << "}\n";
+using namespace std;
+
+static GLchar infoLog[1024];
+
+static void compileShaderFile(GLuint shader, const char* fileName) {
+	ifstream file(fileName, ios::ate);
+	if(!file) {
+		cerr << "Failed to open shader file: " << fileName << '\n';
+		exit(1);
+	}
+	const GLint size = (GLint) file.tellg();
+	char* src = new char[size];
+	file.seekg(0);
+	file.read(src, size);
+	file.close();
+	const regex includeRegex(R"(#include\s+[\"<]/(.*)[\">])");
+	cmatch match;
+	const char* search_src = src;
+	while(regex_search(search_src, match, includeRegex)) {
+		if(!glIsNamedStringARB(match[1].length()+1, match[1].first-1)) {
+			ifstream includeFile(SHADER_DIR "/" + match[1].str(), ios::ate);
+			if(!includeFile) {
+				cerr << "Failed to open shader include file: " << (SHADER_DIR "/" + match[1].str()) << '\n';
+				exit(1);
+			}
+			const GLint includeSize = (GLint) includeFile.tellg();
+			char* includeSrc = new char[includeSize];
+			includeFile.seekg(0);
+			includeFile.read(includeSrc, includeSize);
+			includeFile.close();
+			glNamedStringARB(GL_SHADER_INCLUDE_ARB, match[1].length()+1, match[1].first-1, includeSize, includeSrc);
+			delete[] includeSrc;
+		}
+		search_src = match.suffix().first;
+	}
+	glShaderSource(shader, 1, &src, &size);
+	delete[] src;
+	glCompileShaderIncludeARB(shader, 0, nullptr, nullptr);
+	GLint succes;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &succes);
+	if(!succes) {
+		glGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);
+		cerr << "Failed to compile shader: " << fileName << "\n" << infoLog;
+		exit(1);
+	}
+}
+
+void Programs::Program::init(GLuint vertexShader, GLuint fragmentShader) {
+	prog = glCreateProgram();
+	glAttachShader(prog, vertexShader);
+	glAttachShader(prog, fragmentShader);
+	glLinkProgram(prog);
+	GLint succes;
+	glGetProgramiv(prog, GL_LINK_STATUS, &succes);
+	if(!succes) {
+		glGetProgramInfoLog(prog, sizeof(infoLog), nullptr, infoLog);
+		cerr << "Failed to link program: \n" << infoLog;
+		exit(1);
+	}
+}
+)lim";
 
 	Cfile << "\nvoid Programs::init() {\n";
 	for(const auto &name : vertShaders | views::elements<0>) {

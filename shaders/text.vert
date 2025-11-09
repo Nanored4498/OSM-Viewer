@@ -3,6 +3,9 @@
 // See <https://www.gnu.org/licenses/>
 
 #version 460
+#extension GL_ARB_shading_language_include : require
+
+#include "/camera.glsl"
 
 struct GlyphData {
 	vec2 txtCenter;
@@ -16,11 +19,9 @@ layout (binding = 0, std430) readonly buffer ssbo {
 	GlyphData glyphs[];
 };
 
-out vec2 uv;
-
-uniform vec2 center;
-uniform vec2 scale;
 uniform vec2 txtScale;
+
+out vec2 uv;
 
 const vec2 off[6] = vec2[6](
 	vec2(0., 0.),
