@@ -3,13 +3,14 @@
 // See <https://www.gnu.org/licenses/>
 
 #include <bit>
-#include <cassert>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <numbers>
 #include <ranges>
+#include <string_view>
 #include <unordered_set>
 
 // TODO: rewrite decompression
@@ -84,61 +85,43 @@ int main() {
 		vector<uint8_t> data(blob.raw_size);
 		if(blob._data_choice == Proto::Blob::DATA_ZLIB_DATA) {
 			uLongf data_size = blob.raw_size;
-			if(uncompress(data.data(), &data_size, blob.data.zlib_data.data(), blob.data.zlib_data.size()) != Z_OK) {
-				cerr << "Failed to uncompress...\n";
-				return 1;
-			}
-		} else {
-			cerr << "Uncompression of blob data not implemented " << blob._data_choice << endl;
-			exit(1);
-		}
+			if(uncompress(data.data(), &data_size, blob.data.zlib_data.data(), blob.data.zlib_data.size()) != Z_OK)
+				THROW_ERROR("Failed to uncompress...");
+		} else THROW_ERROR("Uncompression of blob data not implemented " + to_string(blob._data_choice));
 		if(header.type == "OSMHeader") {
-			if(hasHeader) {
-				cerr << "multiple OSMHeader..." << endl;
-				exit(1);
-			}
+			if(hasHeader) THROW_ERROR("multiple OSMHeader...");
 			hasHeader = true;
 			const Proto::HeaderBlock hb(data);
 			if(hb._has_bbox) bbox = hb.bbox;
 			for(const string &feature : hb.required_features) {
-				if(!supported_features.count(feature)) {
-					cerr << "Not supported required feature: " << feature << endl;
-					exit(1);
-				}
+				if(!supported_features.count(feature))
+					THROW_ERROR("Not supported required feature: " + feature);
 			}
 			cout << "Optional features:\n";
 			for(const string &s : hb.optional_features)
 				cout << '\t' << s << endl;
 		} else if(header.type == "OSMData") {
-			if(!hasHeader) {
-				cerr << "OSMData blob before any OSMHeader..." << endl;
-				exit(1);
-			}
+			if(!hasHeader) THROW_ERROR("OSMData blob before any OSMHeader...");
 			Proto::PrimitiveBlock pb(data);
 			const auto &ST = pb.stringtable.s;
+			const auto getString = [&](uint32_t i) {
+				return string_view(reinterpret_cast<const char*>(ST[i].data()), ST[i].size());
+			};
 			for(Proto::PrimitiveGroup &pg : pb.primitivegroup) {
-				for([[maybe_unused]] const Proto::Node &node : pg.nodes) {
-					cerr << "Not implemented (" << __FILE__ << ':' << __LINE__ << ")\n";
-					exit(1);
-				}
+				if(!pg.nodes.empty()) THROW_ERROR("Not implemented");
+				if(!pg.changesets.empty()) THROW_ERROR("Not implemented");
 				for(Proto::Way &way : pg.ways) {
-					if(!way.lat.empty() || !way.lon.empty()) {
-						cerr << "lat and lon fields in Way are not supported (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
+					if(!way.lat.empty() || !way.lon.empty()) THROW_ERROR("lat and lon fields in Way are not supported");
 					const int T = way.keys.size();
-					if(T != (int) way.vals.size()) {
-						cerr << "Sizes mismatch in way's tags... (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
+					if(T != (int) way.vals.size()) THROW_ERROR("Sizes mismatch in way's tags...");
 					const int R = way.refs.size();
 					for(int i = 1; i < R; ++i)
 						way.refs[i] += way.refs[i-1];
 					bool is_boundary = false;
 					int admin_level = -1;
 					for(int i = 0; i < T; ++i) {
-						const string key(ST[way.keys[i]].begin(), ST[way.keys[i]].end());
-						const string val(ST[way.vals[i]].begin(), ST[way.vals[i]].end());
+						const string_view key = getString(way.keys[i]);
+						const string_view val = getString(way.vals[i]);
 						if(key == "highway" || key == "waterway") {
 							const int i = ranges::find(roadTypes, val, [&](const RoadType &rt) {
 								return rt.name;
@@ -149,7 +132,8 @@ int main() {
 							if(val == "administrative")
 								is_boundary = true;
 						} else if(key == "admin_level") {
-							admin_level = stoi(val);
+							if(from_chars(val.begin(), val.end(), admin_level).ec != errc())
+								THROW_ERROR("admin_level is not a number: " + string(val));
 						}
 					}
 					if(is_boundary && admin_level == 2) {
@@ -158,24 +142,15 @@ int main() {
 				}
 				for(const Proto::Relation &relation : pg.relations) {
 					const int T = relation.keys.size();
-					if(T != (int) relation.vals.size()) {
-						cerr << "Sizes mismatch in relation's tags... (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
+					if(T != (int) relation.vals.size()) THROW_ERROR("Sizes mismatch in relation's tags...");
 					const int M = relation.memids.size();
-					if(M != (int) relation.roles_sid.size()) {
-						cerr << "Sizes mismatch in relation's members... (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
-					if(M != (int) relation.types.size()) {
-						cerr << "Sizes mismatch in relation's members... (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
+					if(M != (int) relation.roles_sid.size()) THROW_ERROR("Sizes mismatch in relation's members...");
+					if(M != (int) relation.types.size()) THROW_ERROR("Sizes mismatch in relation's members...");
 					bool isWaterway = false, isRiver = false;
 					string name, sandre = "none...";
 					for(int i = 0; i < T; ++i) {
-						const string key(ST[relation.keys[i]].begin(), ST[relation.keys[i]].end());
-						const string val(ST[relation.vals[i]].begin(), ST[relation.vals[i]].end());
+						const string_view key = getString(relation.keys[i]);
+						const string_view val = getString(relation.vals[i]);
 						if(key == "type") {
 							if(val == "waterway") isWaterway = true;
 						} else if(key == "waterway") {
@@ -197,17 +172,11 @@ int main() {
 						}
 					}
 				}
-				for([[maybe_unused]] const Proto::ChangeSet &changeset : pg.changesets) {
-					cerr << "Not implemented (" << __FILE__ << ':' << __LINE__ << ")\n";
-					exit(1);
-				}
 				if(pg._has_dense) {
 					const Proto::DenseNodes &dense = pg.dense;
 					const int N = dense.id.size();
-					if(N != (int) dense.lat.size() || N != (int) dense.lon.size()) {
-						cerr << "Sizes mismatch in denseNodes... (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
+					if(N != (int) dense.lat.size() || N != (int) dense.lon.size())
+						THROW_ERROR("Sizes mismatch in denseNodes...");
 					auto kv_it = dense.keys_vals.begin();
 					int64_t id = 0, lat = 0, lon = 0;
 					for(int i = 0; i < N; ++i) {
@@ -220,17 +189,16 @@ int main() {
 						string place, name;
 						int capital = -1;
 						while(*kv_it) {
-							const string key(ST[*kv_it].begin(), ST[*kv_it].end());
-							++ kv_it;
-							const string val(ST[*kv_it].begin(), ST[*kv_it].end());
-							++ kv_it;
+							const string_view key = getString(*(kv_it++));
+							const string_view val = getString(*(kv_it++));
 							if(key == "place") {
 								place = val;
 							} else if(key == "name") {
 								name = val;
 							} else if(key == "capital") {
 								if(val == "yes") capital = 2;
-								else capital = stoi(val);
+								else if(from_chars(val.begin(), val.end(), capital).ec != errc())
+									THROW_ERROR("admin_level is not a number: " + string(val));
 							}
 						}
 						if(place == "city") {
@@ -239,16 +207,10 @@ int main() {
 						}
 						++ kv_it;
 					}
-					if(kv_it != dense.keys_vals.end()) {
-						cerr << "Sizes mismatch in denseNodes... (" << __FILE__ << ':' << __LINE__ << ")\n";
-						exit(1);
-					}
+					if(kv_it != dense.keys_vals.end()) THROW_ERROR("Sizes mismatch in denseNodes...");
 				}
 			}
-		} else {
-			cerr << "Not recognized blob type: " << header.type << endl;
-			exit(1);
-		}
+		} else THROW_ERROR("Not recognized blob type: " + header.type);
 	}
 
 	{ // Only keep main rivers
@@ -270,7 +232,6 @@ int main() {
 			if(r.first != *good) continue;
 			rivers[n++] = std::move(r);
 		}
-		cerr << n << endl;
 		rivers.resize(n);
 	}
 
