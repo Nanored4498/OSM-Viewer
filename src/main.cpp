@@ -61,8 +61,9 @@ constexpr RoadType roadTypes[] {
 	{"primary",  {0.992f, 0.843f, 0.631f}, {0.671f, 0.482f, 0.012f}, false},
 	{"river",    {0.667f, 0.827f, 0.875f}, {0.667f, 0.827f, 0.875f}, false},
 };
-vector<vector<int64_t>> roads[std::size(roadTypes)], countryBorders;
+vector<pair<int64_t, vector<int64_t>>> roads[std::size(roadTypes)], countryBorders;
 vector<pair<string, int64_t>> capitals;
+vector<int64_t> mainRivers;
 
 constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
 
@@ -139,10 +140,11 @@ int main() {
 						const string key(ST[way.keys[i]].begin(), ST[way.keys[i]].end());
 						const string val(ST[way.vals[i]].begin(), ST[way.vals[i]].end());
 						if(key == "highway" || key == "waterway") {
-							int i = 0;
-							while(i < (int) std::size(roadTypes) && val != roadTypes[i].name) ++i;
+							const int i = ranges::find(roadTypes, val, [&](const RoadType &rt) {
+								return rt.name;
+							}) - roadTypes;
 							if(i < (int) std::size(roadTypes))
-								roads[i].push_back(way.refs);
+								roads[i].emplace_back(way.id, way.refs);
 						} else if(key == "boundary") {
 							if(val == "administrative")
 								is_boundary = true;
@@ -150,28 +152,49 @@ int main() {
 							admin_level = stoi(val);
 						}
 					}
-					if(is_boundary) {
-						if(admin_level == 2) {
-							countryBorders.push_back(way.refs);
-							const Node &n = nodes[way.refs[0]];
-							if(n.lat < .12*bbox.bottom + .88*bbox.top && n.lon < .7*bbox.left + .3*bbox.right) {
-								cerr << way.id << ' ' << n.lon << ' ' << n.lat << ' ' << bbox.left << ' ' << bbox.right << endl;
-
-								for(int i = 0; i < T; ++i) {
-									const string key(ST[way.keys[i]].begin(), ST[way.keys[i]].end());
-									const string val(ST[way.vals[i]].begin(), ST[way.vals[i]].end());
-									cerr << key << ": " << val << "; ";
-								}
-								cerr << endl;
-							}
-						}
+					if(is_boundary && admin_level == 2) {
+						countryBorders.emplace_back(way.id, way.refs);
 					}
 				}
 				for(const Proto::Relation &relation : pg.relations) {
 					const int T = relation.keys.size();
 					if(T != (int) relation.vals.size()) {
-						cerr << "Sizes mismatch in way's tags... (" << __FILE__ << ':' << __LINE__ << ")\n";
+						cerr << "Sizes mismatch in relation's tags... (" << __FILE__ << ':' << __LINE__ << ")\n";
 						exit(1);
+					}
+					const int M = relation.memids.size();
+					if(M != (int) relation.roles_sid.size()) {
+						cerr << "Sizes mismatch in relation's members... (" << __FILE__ << ':' << __LINE__ << ")\n";
+						exit(1);
+					}
+					if(M != (int) relation.types.size()) {
+						cerr << "Sizes mismatch in relation's members... (" << __FILE__ << ':' << __LINE__ << ")\n";
+						exit(1);
+					}
+					bool isWaterway = false, isRiver = false;
+					string name, sandre = "none...";
+					for(int i = 0; i < T; ++i) {
+						const string key(ST[relation.keys[i]].begin(), ST[relation.keys[i]].end());
+						const string val(ST[relation.vals[i]].begin(), ST[relation.vals[i]].end());
+						if(key == "type") {
+							if(val == "waterway") isWaterway = true;
+						} else if(key == "waterway") {
+							if(val == "river") isRiver = true;
+						} else if(key == "name") {
+							name = val;
+						} else if(key == "ref:sandre") {
+							sandre = val;
+						}
+					}
+					if(isWaterway && isRiver && sandre.size() > 1 && sandre[1] == '-') {
+						int64_t memid = 0;
+						for(int i = 0; i < M; ++i) {
+							memid += relation.memids[i];
+							if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
+							const string role(ST[relation.roles_sid[i]].begin(), ST[relation.roles_sid[i]].end());
+							if(role != "main_stream") continue;
+							mainRivers.push_back(memid);
+						}
 					}
 				}
 				for([[maybe_unused]] const Proto::ChangeSet &changeset : pg.changesets) {
@@ -228,6 +251,29 @@ int main() {
 		}
 	}
 
+	{ // Only keep main rivers
+		auto &rivers = roads[ranges::find(roadTypes, "river", [&](const RoadType &rt) {
+			return rt.name;
+		}) - roadTypes];
+		ranges::sort(rivers, less<int64_t>{},
+			[](const decltype(rivers[0]) &r) {
+				return r.first;
+			}
+		);
+		ranges::sort(mainRivers);
+		auto good = mainRivers.begin();
+		int n = 0;
+		for(auto &r : rivers) {
+			while(good != mainRivers.end() && *good < r.first)
+				++ good;
+			if(good == mainRivers.end()) break;
+			if(r.first != *good) continue;
+			rivers[n++] = std::move(r);
+		}
+		cerr << n << endl;
+		rivers.resize(n);
+	}
+
 	if(bbox.right == numeric_limits<int64_t>::min()) {
 		bbox.left = numeric_limits<int64_t>::max();
 		bbox.top = numeric_limits<int64_t>::min();
@@ -265,7 +311,7 @@ int main() {
 		wr.border = roadTypes[i].border;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		CMDcount += (wr.count = roads[i].size());
-		for(const auto &r : roads[i]) VBOcount += r.size();
+		for(const auto &r : roads[i] | views::elements<1>) VBOcount += r.size();
 	}
 	{ // Country border
 		Window::Road &wr = window.roads.emplace_back();
@@ -275,7 +321,7 @@ int main() {
 		wr.border = false;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		CMDcount += (wr.count = countryBorders.size());
-		for(const auto &r : countryBorders) VBOcount += r.size();
+		for(const auto &r : countryBorders | views::elements<1>) VBOcount += r.size();
 	}
 	// Capitals points
 	window.capitalsFirst = VBOcount;
@@ -291,8 +337,8 @@ int main() {
 	float *bufMap = (float*) glMapNamedBuffer(VBO, GL_WRITE_ONLY);
 	GLuint *cmdMap = (GLuint*) glMapNamedBuffer(window.cmdBuffer, GL_WRITE_ONLY);
 	VBOcount = 0;
-	const auto writeRoads2GPU = [&](const vector<vector<int64_t>> &roads) {
-		for(const auto &r : roads) {
+	const auto writeRoads2GPU = [&](const vector<pair<int64_t, vector<int64_t>>> &roads) {
+		for(const auto &r : roads | views::elements<1>) {
 			*(cmdMap++) = r.size(); // count
 			*(cmdMap++) = 1; // instanceCount
 			*(cmdMap++) = VBOcount; // first
