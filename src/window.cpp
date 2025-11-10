@@ -137,17 +137,18 @@ void Window::start() {
 
 		// Render roads and capitals
 		glBindVertexArray(VAO);
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
 		progs.main.use();
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
 			if(!r.border) continue;
 			progs.main.set_color(r.r2, r.g2, r.b2);
-			glDrawArrays(GL_LINES, r.first, r.count);
+			glMultiDrawArraysIndirect(GL_LINE_STRIP, r.offset, r.count, 0);
 		}
 		glLineWidth(3.f);
 		for(const Road &r : roads | views::reverse) {
 			progs.main.set_color(r.r, r.g, r.b);
-			glDrawArrays(GL_LINES, r.first, r.count);
+			glMultiDrawArraysIndirect(GL_LINE_STRIP, r.offset, r.count, 0);
 		}
 		progs.capital.use();
 		glPointSize(12.f);

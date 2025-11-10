@@ -175,7 +175,6 @@ int main(int argc, char* argv[]) {
 	glfwMakeContextCurrent(window);
 	gladLoadGL(glfwGetProcAddress);
 
-
 	// Search for attributes and uniforms
 	shaderDir = argv[2];
 	for(auto &[name, shader] : vertShaders) {

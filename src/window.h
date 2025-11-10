@@ -25,7 +25,7 @@ struct Window {
 	int width = 800;
 	int height = 600;
 
-	GLuint UBO, VAO, textSSBO;
+	GLuint UBO, VAO, cmdBuffer, textSSBO;
 	Programs progs;
 	Font::Atlas atlas;
 
@@ -35,7 +35,7 @@ struct Window {
 	struct Road {
 		float r, g, b;
 		float r2, g2, b2;
-		GLint first;
+		const void* offset;
 		GLsizei count;
 		bool border;
 	};

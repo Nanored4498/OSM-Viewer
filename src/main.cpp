@@ -220,7 +220,6 @@ int main() {
 						cerr << "Sizes mismatch in denseNodes... (" << __FILE__ << ':' << __LINE__ << ")\n";
 						exit(1);
 					}
-					// WARNING: We don't care about DenseInfo here
 				}
 			}
 		} else {
@@ -252,11 +251,9 @@ int main() {
 	window.init(lon2Float(bbox.left), lon2Float(bbox.right), lat2Float(bbox.bottom), lat2Float(bbox.top));
 
 	// VBO
-	GLuint VBO;
-	glCreateBuffers(1, &VBO);
 
 	// Compute size
-	GLsizei VBOcount = 0;
+	GLsizei VBOcount = 0, CMDcount = 0;
 	for(int i = 0; i < (int) std::size(roads); ++i) {
 		Window::Road &wr = window.roads.emplace_back();
 		wr.r = roadTypes[i].col.r;
@@ -266,10 +263,9 @@ int main() {
 		wr.g2 = roadTypes[i].col2.g;
 		wr.b2 = roadTypes[i].col2.b;
 		wr.border = roadTypes[i].border;
-		wr.first = VBOcount;
-		wr.count = 0;
-		for(const auto &r : roads[i]) wr.count += 2*(r.size()-1);
-		VBOcount += wr.count;
+		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
+		CMDcount += (wr.count = roads[i].size());
+		for(const auto &r : roads[i]) VBOcount += r.size();
 	}
 	{ // Country border
 		Window::Road &wr = window.roads.emplace_back();
@@ -277,45 +273,45 @@ int main() {
 		wr.g = countryBorderColor.g;
 		wr.b = countryBorderColor.b;
 		wr.border = false;
-		wr.first = VBOcount;
-		wr.count = 0;
-		for(const auto &r : countryBorders) wr.count += 2*(r.size()-1);
-		VBOcount += wr.count;
+		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
+		CMDcount += (wr.count = countryBorders.size());
+		for(const auto &r : countryBorders) VBOcount += r.size();
 	}
 	// Capitals points
 	window.capitalsFirst = VBOcount;
 	window.capitalsCount = capitals.size();
 	VBOcount += capitals.size();
 
-	// Fill VBO
-	// TODO: If this VBO is not updated, remove GL_MAP_WRITE_BIT
+	// VBO and cmdBuffer
+	GLuint VBO;
+	glCreateBuffers(1, &VBO);
 	glNamedBufferStorage(VBO, VBOcount * 2 * sizeof(float), nullptr, GL_MAP_WRITE_BIT);
+	glCreateBuffers(1, &window.cmdBuffer);
+	glNamedBufferStorage(window.cmdBuffer, CMDcount * 4 * sizeof(GLuint), nullptr, GL_MAP_WRITE_BIT);
 	float *bufMap = (float*) glMapNamedBuffer(VBO, GL_WRITE_ONLY);
-	for(const auto &roads : roads) {
+	GLuint *cmdMap = (GLuint*) glMapNamedBuffer(window.cmdBuffer, GL_WRITE_ONLY);
+	VBOcount = 0;
+	const auto writeRoads2GPU = [&](const vector<vector<int64_t>> &roads) {
 		for(const auto &r : roads) {
-			const int n = r.size();
-			for(int i = 1; i < n; ++i) {
-				*(bufMap++) = lon2Float(nodes[r[i-1]].lon);
-				*(bufMap++) = lat2Float(nodes[r[i-1]].lat);
-				*(bufMap++) = lon2Float(nodes[r[i]].lon);
-				*(bufMap++) = lat2Float(nodes[r[i]].lat);
+			*(cmdMap++) = r.size(); // count
+			*(cmdMap++) = 1; // instanceCount
+			*(cmdMap++) = VBOcount; // first
+			*(cmdMap++) = 0; // baseInstance
+			for(const int64_t id : r) {
+				*(bufMap++) = lon2Float(nodes[id].lon);
+				*(bufMap++) = lat2Float(nodes[id].lat);
 			}
+			VBOcount += r.size();
 		}
-	}
-	for(const auto &r : countryBorders) {
-		const int n = r.size();
-		for(int i = 1; i < n; ++i) {
-			*(bufMap++) = lon2Float(nodes[r[i-1]].lon);
-			*(bufMap++) = lat2Float(nodes[r[i-1]].lat);
-			*(bufMap++) = lon2Float(nodes[r[i]].lon);
-			*(bufMap++) = lat2Float(nodes[r[i]].lat);
-		}
-	}
+	};
+	for(const auto &roads : roads) writeRoads2GPU(roads);
+	writeRoads2GPU(countryBorders);
 	for(const int64_t id : capitals | views::elements<1>) {
 		*(bufMap++) = lon2Float(nodes[id].lon);
 		*(bufMap++) = lat2Float(nodes[id].lat);
 	}
 	glUnmapNamedBuffer(VBO);
+	glUnmapNamedBuffer(window.cmdBuffer);
 
 	// VAO
 	glCreateVertexArrays(1, &window.VAO);
