@@ -60,7 +60,7 @@ void Window::setAspect(int width, int height) {
 	this->height = height;
 }
 
-void Window::init(float x0, float x1, float y0, float y1) {
+void Window::init(const vec2f &v0, const vec2f &v1) {
 	if(!glfwInit()) THROW_ERROR("Failed to init glfw!");
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
@@ -94,9 +94,9 @@ void Window::init(float x0, float x1, float y0, float y1) {
 	progs.init();
 
 	// setup camera
-	centerX = (x0 + x1) / 2.;
-	centerY = (y0 + y1) / 2.;
-	scale = 2.f * min(width/(x1 - x0), height/(y1 - y0));
+	centerX = (v0.x + v1.x) / 2.;
+	centerY = (v0.y + v1.y) / 2.;
+	scale = 2.f * min(width/(v1.x - v0.x), height/(v1.y - v0.y));
 
 	// Load fonts
 	atlas = Font::getTTFAtlas(FONT_DIR "/Roboto-Medium.ttf", 22.f);
@@ -135,10 +135,16 @@ void Window::start() {
 		const float UBOdata[4] {centerX, centerY, scale/width, scale/height};
 		glNamedBufferSubData(UBO, 0, sizeof(UBOdata), UBOdata);
 
-		// Render roads and capitals
 		glBindVertexArray(VAO);
-		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
 		progs.main.use();
+
+		// Render forests
+		// TODO: draw trees icon either with frag shader or with texture
+		progs.main.set_color(0.675f, 0.824f, 0.612f);
+		glDrawElements(GL_TRIANGLES, forestsCount, GL_UNSIGNED_INT, 0);
+
+		// Render roads
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
 			if(!r.border) continue;
@@ -150,6 +156,8 @@ void Window::start() {
 			progs.main.set_color(r.r, r.g, r.b);
 			glMultiDrawArraysIndirect(GL_LINE_STRIP, r.offset, r.count, 0);
 		}
+
+		// Render capitals
 		progs.capital.use();
 		glPointSize(12.f);
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);

@@ -65,7 +65,8 @@ static void compileShaderFile(GLuint shader, const char* fileName) {
 	const regex includeRegex(R"(#include\s+[\"<]/(.*)[\">])");
 	cmatch match;
 	const char* search_src = src;
-	while(regex_search(search_src, match, includeRegex)) {
+	const char* search_src_end = search_src + size;
+	while(regex_search(search_src, search_src_end, match, includeRegex)) {
 		if(!glIsNamedStringARB(match[1].length()+1, match[1].first-1)) {
 			ifstream includeFile(shaderDir / match[1].str(), ios::ate);
 			if(!includeFile) {
@@ -318,7 +319,8 @@ static void compileShaderFile(GLuint shader, const char* fileName) {
 	const regex includeRegex(R"(#include\s+[\"<]/(.*)[\">])");
 	cmatch match;
 	const char* search_src = src;
-	while(regex_search(search_src, match, includeRegex)) {
+	const char* search_src_end = search_src + size;
+	while(regex_search(search_src, search_src_end, match, includeRegex)) {
 		if(!glIsNamedStringARB(match[1].length()+1, match[1].first-1)) {
 			ifstream includeFile(SHADER_DIR "/" + match[1].str(), ios::ate);
 			if(!includeFile) {

@@ -6,20 +6,26 @@
 
 out vec4 fragColor;
 
-const float pointSize = 12.;
+const float pointSize = 16.;
 const float d1 = 1./6.-1./(2.*pointSize);
 const float d2 = 1./6.+1./(2.*pointSize);
 const float d3 = 1./3.-1./(2.*pointSize);
 const float d4 = 1./3.+1./(2.*pointSize);
+const float d5 = 1./2.-1./(2.*pointSize);
+const float d6 = 1./2.+1./(2.*pointSize);
 
 void main() {
 	vec2 c = gl_PointCoord - vec2(0.5);
 	float d = dot(c, c);
-	if(d > 0.25) discard;
+	if(d > d6*d6) discard;
 	d = sqrt(d);
-	float g = d < d1 || d > d4 ? 0. :
-			d < d2 ? pointSize*(d - d1) : 
-			d < d3 ? 1. :
-			pointSize*(d4 - d);
-	fragColor = vec4(vec3(g), 1.);
+	if(d > d5) {
+		fragColor = vec4(vec3(0.), pointSize*(d6-d));
+	} else {
+		float g = d < d1 || d > d4 ? 0. :
+				d < d2 ? pointSize*(d - d1) : 
+				d < d3 ? 1. :
+				pointSize*(d4 - d);
+		fragColor = vec4(vec3(g), 1.);
+	}
 }

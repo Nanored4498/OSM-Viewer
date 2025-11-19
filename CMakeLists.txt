@@ -40,6 +40,7 @@ add_dependencies(OSM
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
+	MAP_DIR=\"${CMAKE_SOURCE_DIR}/map\"
 	SHADER_DIR=\"${CMAKE_SOURCE_DIR}/shaders\"
 	FONT_DIR=\"${CMAKE_SOURCE_DIR}/fonts\"
 )

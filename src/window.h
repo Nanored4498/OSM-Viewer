@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // See <https://www.gnu.org/licenses/>
 
+#pragma once
+
 #include <vector>
 
 #define GLFW_INCLUDE_NONE
@@ -10,9 +12,10 @@
 
 #include "font.h"
 #include "programs/generated/programs.h"
+#include "vec.h"
 
 struct Window {
-	void init(float x0, float x1, float y0, float y1);
+	void init(const vec2f &v0, const vec2f &v1);
 	void start();
 
 	void updateScale(double add, double x, double y);
@@ -43,4 +46,5 @@ struct Window {
 	GLint capitalsFirst;
 	GLsizei capitalsCount;
 	GLsizei charactersCount;
+	GLsizei forestsCount;
 };

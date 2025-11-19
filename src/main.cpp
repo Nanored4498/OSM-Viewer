@@ -17,7 +17,9 @@
 #include <zlib.h>
 
 #include "hashmap.h"
+#include "triangulate.h"
 #include "utils.h"
+#include "vec.h"
 #include "window.h"
 
 #include "proto/generated/osm.pb.h"
@@ -40,10 +42,6 @@ unordered_set<string> supported_features = {
 	"DenseNodes",
 };
 
-struct Node {
-	int64_t lon, lat;
-};
-
 struct Color {
 	float r, g, b;
 };
@@ -54,7 +52,7 @@ struct RoadType {
 	bool border;
 };
 
-HashMap<Node> nodes;
+HashMap<vec2l> nodes;
 
 constexpr RoadType roadTypes[] {
 	{"motorway", {0.914f, 0.565f, 0.627f}, {0.878f, 0.180f, 0.420f}, true},
@@ -66,15 +64,16 @@ vector<pair<int64_t, vector<int64_t>>> roads[std::size(roadTypes)], countryBorde
 vector<pair<string, int64_t>> capitals;
 vector<int64_t> mainRivers;
 
+vector<vector<int64_t>> forests;
+
 constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
 
 int main() {
-	BinStream input("map/lorraine-latest.osm.pbf");
+	BinStream input(MAP_DIR "/lorraine-latest.osm.pbf");
 	uint32_t blobHeaderSize;
 	vector<uint8_t> wire;
 	bool hasHeader = false;
-	Proto::HeaderBBox bbox;
-	bbox.right = numeric_limits<int64_t>::min();
+	Box<vec2l> bbox;
 	while(input.readInt(blobHeaderSize)) {
 		wire.resize(blobHeaderSize);
 		input.read(reinterpret_cast<char*>(wire.data()), wire.size());
@@ -92,7 +91,12 @@ int main() {
 			if(hasHeader) THROW_ERROR("multiple OSMHeader...");
 			hasHeader = true;
 			const Proto::HeaderBlock hb(data);
-			if(hb._has_bbox) bbox = hb.bbox;
+			if(hb._has_bbox) {
+				bbox.min.x = hb.bbox.left;
+				bbox.min.y = hb.bbox.bottom;
+				bbox.max.x = hb.bbox.right;
+				bbox.max.y = hb.bbox.top;
+			}
 			for(const string &feature : hb.required_features) {
 				if(!supported_features.count(feature))
 					THROW_ERROR("Not supported required feature: " + feature);
@@ -119,6 +123,7 @@ int main() {
 						way.refs[i] += way.refs[i-1];
 					bool is_boundary = false;
 					int admin_level = -1;
+					bool is_forest = false;
 					for(int i = 0; i < T; ++i) {
 						const string_view key = getString(way.keys[i]);
 						const string_view val = getString(way.vals[i]);
@@ -134,10 +139,18 @@ int main() {
 						} else if(key == "admin_level") {
 							if(from_chars(val.begin(), val.end(), admin_level).ec != errc())
 								THROW_ERROR("admin_level is not a number: " + string(val));
+						} else if(key == "landuse") {
+							if(val == "forest")
+								is_forest = true;
 						}
 					}
-					if(is_boundary && admin_level == 2) {
-						countryBorders.emplace_back(way.id, way.refs);
+					if(is_boundary && admin_level != -1 && admin_level <= 4) {
+						// TODO: different rendering depending on admin level
+						countryBorders.emplace_back(way.id, move(way.refs));
+					} else if(is_forest) {
+						if(way.refs[0] != way.refs.back()) THROW_ERROR("Not closed");
+						way.refs.pop_back();
+						forests.emplace_back(move(way.refs));
 					}
 				}
 				for(const Proto::Relation &relation : pg.relations) {
@@ -147,18 +160,23 @@ int main() {
 					if(M != (int) relation.roles_sid.size()) THROW_ERROR("Sizes mismatch in relation's members...");
 					if(M != (int) relation.types.size()) THROW_ERROR("Sizes mismatch in relation's members...");
 					bool isWaterway = false, isRiver = false;
-					string name, sandre = "none...";
+					bool isRoute = false;
+					string_view sandre;
+					string_view network, ref;
 					for(int i = 0; i < T; ++i) {
 						const string_view key = getString(relation.keys[i]);
 						const string_view val = getString(relation.vals[i]);
 						if(key == "type") {
 							if(val == "waterway") isWaterway = true;
+							else if(val == "route") isRoute = true;
 						} else if(key == "waterway") {
 							if(val == "river") isRiver = true;
-						} else if(key == "name") {
-							name = val;
 						} else if(key == "ref:sandre") {
 							sandre = val;
+						} else if(key == "network") {
+							network = val;
+						} else if(key == "ref") {
+							ref = val;
 						}
 					}
 					if(isWaterway && isRiver && sandre.size() > 1 && sandre[1] == '-') {
@@ -170,6 +188,9 @@ int main() {
 							if(role != "main_stream") continue;
 							mainRivers.push_back(memid);
 						}
+					}
+					if(isRoute && (network == "FR:A-road" || network == "FR:N-road")) {
+						cout << ref << endl;
 					}
 				}
 				if(pg._has_dense) {
@@ -183,9 +204,9 @@ int main() {
 						id += dense.id[i];
 						lat += dense.lat[i];
 						lon += dense.lon[i];
-						Node &node = nodes[id];
-						node.lon = pb.lon_offset + pb.granularity * lon;
-						node.lat = pb.lat_offset + pb.granularity * lat;
+						vec2l &node = nodes[id];
+						node.x = pb.lon_offset + pb.granularity * lon;
+						node.y = pb.lat_offset + pb.granularity * lat;
 						string place, name;
 						int capital = -1;
 						while(*kv_it) {
@@ -235,29 +256,18 @@ int main() {
 		rivers.resize(n);
 	}
 
-	if(bbox.right == numeric_limits<int64_t>::min()) {
-		bbox.left = numeric_limits<int64_t>::max();
-		bbox.top = numeric_limits<int64_t>::min();
-		bbox.bottom = numeric_limits<int64_t>::max();
-		for(const auto &[id, node] : nodes) {
-			bbox.left   = min(bbox.left,   node.lon);
-			bbox.right  = max(bbox.right,  node.lon);
-			bbox.bottom = min(bbox.bottom, node.lat);
-			bbox.top    = max(bbox.top,    node.lat);
-		}
-	}
-
-	const auto lon2Float = [](int64_t x) {
-		return double(x) * (numbers::pi / 180e9);
-	};
-	const auto lat2Float = [](int64_t x) {
-		return log(tan(numbers::pi * (double(x) / 360e9 + .25)));
-	};
-
+	// Create window
 	Window window;
-	window.init(lon2Float(bbox.left), lon2Float(bbox.right), lat2Float(bbox.bottom), lat2Float(bbox.top));
-
-	// VBO
+	if(bbox.min.x == numeric_limits<int64_t>::max())
+		for(const vec2l &node : nodes | views::values)
+			bbox.update(node);
+	const auto mercator = [&](const vec2l &node)->vec2f {
+		return vec2f(
+			double(node.x) * (numbers::pi / 180e9),
+			log(tan(numbers::pi * (double(node.y) / 360e9 + .25)))
+		);
+	};
+	window.init(mercator(bbox.min), mercator(bbox.max));
 
 	// Compute size
 	GLsizei VBOcount = 0, CMDcount = 0;
@@ -272,7 +282,7 @@ int main() {
 		wr.border = roadTypes[i].border;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		CMDcount += (wr.count = roads[i].size());
-		for(const auto &r : roads[i] | views::elements<1>) VBOcount += r.size();
+		for(const auto &r : roads[i] | views::values) VBOcount += r.size();
 	}
 	{ // Country border
 		Window::Road &wr = window.roads.emplace_back();
@@ -282,47 +292,66 @@ int main() {
 		wr.border = false;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		CMDcount += (wr.count = countryBorders.size());
-		for(const auto &r : countryBorders | views::elements<1>) VBOcount += r.size();
+		for(const auto &r : countryBorders | views::values) VBOcount += r.size();
 	}
 	// Capitals points
 	window.capitalsFirst = VBOcount;
 	window.capitalsCount = capitals.size();
 	VBOcount += capitals.size();
+	// Forests
+	uint32_t forestsFirst = VBOcount;
+	window.forestsCount = 0;
+	for(const auto &forest : forests) {
+		if(forest.size() < 3) THROW_ERROR("area with less than 3 nodes");
+		VBOcount += forest.size();
+		window.forestsCount += 3 * (forest.size() - 2);
+	}
 
-	// VBO and cmdBuffer
-	GLuint VBO;
+	// VBO, EBO, cmdBuffer
+	GLuint VBO, EBO;
 	glCreateBuffers(1, &VBO);
-	glNamedBufferStorage(VBO, VBOcount * 2 * sizeof(float), nullptr, GL_MAP_WRITE_BIT);
+	glNamedBufferStorage(VBO, VBOcount * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
+	glCreateBuffers(1, &EBO);
+	glNamedBufferStorage(EBO, window.forestsCount * sizeof(uint32_t), nullptr, GL_MAP_WRITE_BIT);
 	glCreateBuffers(1, &window.cmdBuffer);
 	glNamedBufferStorage(window.cmdBuffer, CMDcount * 4 * sizeof(GLuint), nullptr, GL_MAP_WRITE_BIT);
-	float *bufMap = (float*) glMapNamedBuffer(VBO, GL_WRITE_ONLY);
+	vec2f *bufMap = (vec2f*) glMapNamedBuffer(VBO, GL_WRITE_ONLY);
+	GLuint *indMap = (GLuint*) glMapNamedBuffer(EBO, GL_WRITE_ONLY);
 	GLuint *cmdMap = (GLuint*) glMapNamedBuffer(window.cmdBuffer, GL_WRITE_ONLY);
 	VBOcount = 0;
 	const auto writeRoads2GPU = [&](const vector<pair<int64_t, vector<int64_t>>> &roads) {
-		for(const auto &r : roads | views::elements<1>) {
+		for(const auto &r : roads | views::values) {
 			*(cmdMap++) = r.size(); // count
 			*(cmdMap++) = 1; // instanceCount
 			*(cmdMap++) = VBOcount; // first
 			*(cmdMap++) = 0; // baseInstance
-			for(const int64_t id : r) {
-				*(bufMap++) = lon2Float(nodes[id].lon);
-				*(bufMap++) = lat2Float(nodes[id].lat);
-			}
+			for(const int64_t id : r)
+				*(bufMap++) = mercator(nodes[id]);
 			VBOcount += r.size();
 		}
 	};
 	for(const auto &roads : roads) writeRoads2GPU(roads);
 	writeRoads2GPU(countryBorders);
-	for(const int64_t id : capitals | views::elements<1>) {
-		*(bufMap++) = lon2Float(nodes[id].lon);
-		*(bufMap++) = lat2Float(nodes[id].lat);
+	for(const int64_t id : capitals | views::elements<1>)
+		*(bufMap++) = mercator(nodes[id]);
+	for(const auto &forest : forests) {
+		vector<vec2l> pts;
+		pts.reserve(forest.size());
+		for(const int64_t id : forest)
+			*(bufMap++) = mercator(pts.emplace_back(nodes[id]));
+		vector<uint32_t> indices = triangulate(pts);
+		for(uint32_t i : indices)
+			*(indMap++) = forestsFirst + i;
+		forestsFirst += forest.size();
 	}
 	glUnmapNamedBuffer(VBO);
+	glUnmapNamedBuffer(EBO);
 	glUnmapNamedBuffer(window.cmdBuffer);
 
 	// VAO
 	glCreateVertexArrays(1, &window.VAO);
 	glVertexArrayVertexBuffer(window.VAO, 0, VBO, 0, 2 * sizeof(float));
+	glVertexArrayElementBuffer(window.VAO, EBO);
 	window.progs.main.bind_p(window.VAO, 0, 0);
 
 	// Capitals text SSBO
@@ -330,35 +359,32 @@ int main() {
 	window.charactersCount = 0;
 	for(const string &name : capitals | views::elements<0>)
 		window.charactersCount += name.size();
-	glNamedBufferStorage(window.textSSBO, window.charactersCount * 10 * sizeof(float), nullptr, GL_MAP_WRITE_BIT);
-	bufMap = (float*) glMapNamedBuffer(window.textSSBO, GL_WRITE_ONLY);
+	glNamedBufferStorage(window.textSSBO, window.charactersCount * 5 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
+	bufMap = (vec2f*) glMapNamedBuffer(window.textSSBO, GL_WRITE_ONLY);
 	for(const auto &[name, id] : capitals) {
 		if(name.empty()) continue;
-		const float txtCenterX = lon2Float(nodes[id].lon);
-		const float txtCenterY = lat2Float(nodes[id].lat);
-		float offX = 0.f, offY = 1e9f;
+		const vec2f txtCenter = mercator(nodes[id]);
+		vec2f offset(0.f, numeric_limits<float>::max());
 		for(int c : name) {
 			const auto &pc = window.atlas.charPositions[c - Font::firstChar];
-			offY = min(offY, pc.yoff);
-			offX += pc.xadvance;
+			offset.x += pc.xadvance;
+			offset.y = min(offset.y, pc.yoff);
 		}
 		const auto &pc0 = window.atlas.charPositions[name[0] - Font::firstChar];
 		const auto &pc1 = window.atlas.charPositions[name.back() - Font::firstChar];
-		offX = - (pc0.xoff + offX - pc1.xadvance + pc1.xoff + pc1.x1 - pc1.x0) / 2.f;
-		offY -= 6.f;
+		offset.x = - (pc0.xoff + offset.x - pc1.xadvance + pc1.xoff + pc1.x1 - pc1.x0) / 2.f;
+		offset.y -= 6.f;
 		for(int c : name) {
 			const auto &cp = window.atlas.charPositions[c - Font::firstChar];
-			*(bufMap++) = txtCenterX;
-			*(bufMap++) = txtCenterY;
-			*(bufMap++) = offX + cp.xoff;
-			*(bufMap++) = offY - cp.yoff;
-			*(bufMap++) = cp.x1 - cp.x0;
-			*(bufMap++) = cp.y0 - cp.y1;
-			*(bufMap++) = (float) cp.x0 / window.atlas.width;
-			*(bufMap++) = (float) cp.y0 / window.atlas.height;
-			*(bufMap++) = float(cp.x1 - cp.x0) / window.atlas.width;
-			*(bufMap++) = float(cp.y1 - cp.y0) / window.atlas.height;
-			offX += cp.xadvance;
+			*(bufMap++) = txtCenter;
+			*(bufMap++) = offset + vec2f(cp.xoff, -cp.yoff);
+			bufMap->x     = cp.x1 - cp.x0;
+			(bufMap++)->y = cp.y0 - cp.y1;
+			bufMap->x     = (float) cp.x0 / window.atlas.width;
+			(bufMap++)->y = (float) cp.y0 / window.atlas.height;
+			bufMap->x     = float(cp.x1 - cp.x0) / window.atlas.width;
+			(bufMap++)->y = float(cp.y1 - cp.y0) / window.atlas.height;
+			offset.x += cp.xadvance;
 		}
 	}
 	glUnmapNamedBuffer(window.textSSBO);

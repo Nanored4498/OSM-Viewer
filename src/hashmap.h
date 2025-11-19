@@ -31,7 +31,7 @@ public:
 
 		const Node* it;
 
-		const_iterator(const Node* it): it(it) {}
+		const_iterator(const Node* it = nullptr): it(it) {}
 
 		reference operator*() const { return std::make_pair(it->id, it->v); }
 		const_iterator& operator++() { ++it; return *this; }
