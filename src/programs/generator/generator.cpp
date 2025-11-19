@@ -221,6 +221,7 @@ int main(int argc, char* argv[]) {
 		getRessources<GL_SHADER_STORAGE_BLOCK, GL_BUFFER_BINDING>(prg, prog.buffers, [](Buffer &b, GLint* vals) {
 			b.binding = vals[1];
 		});
+		// TODO: create a C++ UBO struct
 		getRessources<GL_UNIFORM_BLOCK, GL_BUFFER_BINDING>(prg, prog.ubos, [](UBO &u, GLint* vals) {
 			u.binding = vals[1];
 		});
@@ -264,6 +265,9 @@ struct Programs {
 		for(const Buffer &b : prog.buffers) {
 			Hfile << "\t\tinline void bind_" << b.name << "(GLuint SSBO) const {\n";
 			Hfile << "\t\t\tglBindBufferBase(GL_SHADER_STORAGE_BUFFER, " << b.binding << ", SSBO);\n";
+			Hfile << "\t\t}\n";
+			Hfile << "\t\tinline void bind_" << b.name << "_range(GLuint SSBO, GLintptr offset, GLsizeiptr size) const {\n";
+			Hfile << "\t\t\tglBindBufferRange(GL_SHADER_STORAGE_BUFFER, " << b.binding << ", SSBO, offset, size);\n";
 			Hfile << "\t\t}\n";
 		}
 		for(const UBO &u : prog.ubos) {

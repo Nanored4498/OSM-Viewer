@@ -362,28 +362,44 @@ int main() {
 	glVertexArrayElementBuffer(window.VAO, EBO);
 	window.progs.main.bind_p(window.VAO, 0, 0);
 
-	// Capitals text SSBO
+	// Text SSBO
 	glCreateBuffers(1, &window.textSSBO);
 	window.charactersCount = 0;
+	window.framesCount = mainRoads.size();
 	for(auto txts : {&capitals, &mainRoads})
 	for(const string &name : *txts | views::elements<0>)
 		window.charactersCount += name.size();
-	glNamedBufferStorage(window.textSSBO, window.charactersCount * 5 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
+	window.framesOffset = window.charactersCount * 5 * sizeof(vec2f);
+	glNamedBufferStorage(window.textSSBO,
+		(window.charactersCount * 5 + window.framesCount * 3) * sizeof(vec2f),
+		nullptr, GL_MAP_WRITE_BIT);
 	bufMap = (vec2f*) glMapNamedBuffer(window.textSSBO, GL_WRITE_ONLY);
+	vec2f* frameMap = bufMap + 5 * window.charactersCount;
 	for(auto txts : {&capitals, &mainRoads})
 	for(const auto &[name, id] : *txts) {
 		if(name.empty()) continue;
 		const vec2f txtCenter = mercator(nodes[id]);
 		vec2f offset(0.f, numeric_limits<float>::max());
+		float y1 = numeric_limits<float>::min();
 		for(int c : name) {
 			const auto &pc = window.atlas.charPositions[c - Font::firstChar];
 			offset.x += pc.xadvance;
 			offset.y = min(offset.y, pc.yoff);
+			y1 = max(y1, pc.yoff + pc.y1 - pc.y0);
 		}
-		const auto &pc0 = window.atlas.charPositions[name[0] - Font::firstChar];
-		const auto &pc1 = window.atlas.charPositions[name.back() - Font::firstChar];
-		offset.x = - (pc0.xoff + offset.x - pc1.xadvance + pc1.xoff + pc1.x1 - pc1.x0) / 2.f;
-		offset.y -= 6.f;
+		const auto &cp0 = window.atlas.charPositions[name[0] - Font::firstChar];
+		const auto &cp1 = window.atlas.charPositions[name.back() - Font::firstChar];
+		const float x0 = cp0.xoff;
+		const float x1 = offset.x - cp1.xadvance + cp1.xoff + cp1.x1 - cp1.x0;
+		offset.x = - (x0 + x1) / 2.f;
+		if(txts == &capitals) offset.y -= 6.f;
+		if(txts == &mainRoads) {
+			constexpr float margin = 6.f;
+			*(frameMap++) = txtCenter;
+			*(frameMap++) = offset + vec2f(x0-margin, -y1-margin);
+			frameMap->x     = x1 - x0 + 2.f*margin;
+			(frameMap++)->y = y1 - offset.y + 2.f*margin;
+		}
 		for(int c : name) {
 			const auto &cp = window.atlas.charPositions[c - Font::firstChar];
 			*(bufMap++) = txtCenter;

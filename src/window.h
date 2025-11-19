@@ -47,4 +47,6 @@ struct Window {
 	GLsizei capitalsCount;
 	GLsizei charactersCount;
 	GLsizei forestsCount;
+	GLintptr framesOffset;
+	GLsizei framesCount;
 };

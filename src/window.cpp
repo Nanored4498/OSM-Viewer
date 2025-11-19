@@ -114,7 +114,7 @@ void Window::init(const vec2f &v0, const vec2f &v1) {
 
 	// UBO
 	glCreateBuffers(1, &UBO);
-	glNamedBufferStorage(UBO, 4 * sizeof(float), nullptr, GL_DYNAMIC_STORAGE_BIT);
+	glNamedBufferStorage(UBO, 6 * sizeof(float), nullptr, GL_DYNAMIC_STORAGE_BIT);
 	progs.main.bind_Camera(UBO);
 	progs.capital.bind_Camera(UBO);
 	progs.text.bind_Camera(UBO);
@@ -132,7 +132,11 @@ void Window::start() {
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		// Set UBO
-		const float UBOdata[4] {centerX, centerY, scale/width, scale/height};
+		const float UBOdata[6] {
+			centerX, centerY, // center
+			scale/width, scale/height, // scale
+			2.f/width, 2.f/height // txtScale
+		};
 		glNamedBufferSubData(UBO, 0, sizeof(UBOdata), UBOdata);
 
 		glBindVertexArray(VAO);
@@ -146,6 +150,7 @@ void Window::start() {
 		}
 
 		// Render roads
+		// TODO: Use one glMultiDrawArraysIndirect and remove color uniform for a SSBO of color per draw using gl_DrawID
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
@@ -164,10 +169,15 @@ void Window::start() {
 		glPointSize(12.f);
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
 
+		// Render frames
+		progs.frame.use();
+		progs.frame.bind_ssbo_range(textSSBO, framesOffset, 3*sizeof(vec2f)*framesCount);
+		glDrawArrays(GL_TRIANGLES, 0, 6*framesCount);
+	
 		// Render text
 		progs.text.use();
-		progs.text.set_txtScale(2.f/width, 2.f/height);
 		progs.text.bind_ssbo(textSSBO);
+		progs.text.set_color(1.f, 1.f, 1.f);
 		glDrawArrays(GL_TRIANGLES, 0, 6*charactersCount);
 
 		glfwSwapBuffers(window);

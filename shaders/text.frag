@@ -9,8 +9,9 @@ in vec2 uv;
 out vec4 fragColor;
 
 uniform sampler2D fontAtlas;
+uniform vec3 color;
 
 void main() {
 	float alpha = texture(fontAtlas, uv).r;
-	fragColor = vec4(vec3(0.), alpha);
+	fragColor = vec4(color, alpha);
 }
