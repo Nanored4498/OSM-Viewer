@@ -142,6 +142,9 @@ int main() {
 						} else if(key == "landuse") {
 							if(val == "forest")
 								is_forest = true;
+						} else if(key == "natural") {
+							if(val == "wood")
+								is_forest = true;
 						}
 					}
 					if(is_boundary && admin_level != -1 && admin_level <= 4) {
