@@ -7,58 +7,87 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 template<typename T>
 struct HashMap {
 protected:
 	struct Node {
-		int64_t id;
-		T v;
+		std::pair<const int64_t, T> kv;
 		int nxt;
-		Node(const int64_t id, int nxt): id(id), nxt(nxt) {}
+		Node(const int64_t id, int nxt): kv{id, T()}, nxt(nxt) {}
 	};
+
+	template<bool isConst, typename U>
+	using conditional_const = std::conditional_t<isConst, const U, U>;
+
+	template<bool isConst>
+	struct _iterator {
+	private:
+		template<typename U>
+		using put_const = std::conditional_t<isConst, const U, U>;
+	
+	public:
+		using iterator_category = std::forward_iterator_tag;
+		using difference_type   = std::ptrdiff_t;
+		using value_type        = decltype(Node::kv);
+		using pointer           = put_const<value_type>*;
+		using reference         = put_const<value_type>&;
+
+		put_const<Node>* it;
+
+		_iterator(put_const<Node>* it = nullptr): it(it) {}
+
+		reference operator*() const { return it->kv; }
+		pointer operator->() const { return &it->kv; }
+		_iterator& operator++() { ++it; return *this; }
+		_iterator operator++(int) { _iterator tmp = *this; ++(*this); return tmp; }
+		template<bool isConst2>
+		bool operator==(const _iterator<isConst2>& other) const { return it == other.it; }
+	};
+
 	std::vector<int> buckets;
 	std::vector<Node> v;
 
+	inline int key(int64_t id) const {
+		return id % buckets.size();
+	}
+
 public:
-	struct const_iterator {
-		using iterator_category = std::forward_iterator_tag;
-		using difference_type   = std::ptrdiff_t;
-		using value_type        = const std::pair<int64_t, const T&>;
-		using pointer           = const std::pair<int64_t, const T&>*;
-		using reference         = const std::pair<int64_t, const T&>;
+	using iterator = _iterator<false>;
+	using const_iterator = _iterator<true>;
 
-		const Node* it;
-
-		const_iterator(const Node* it = nullptr): it(it) {}
-
-		reference operator*() const { return std::make_pair(it->id, it->v); }
-		const_iterator& operator++() { ++it; return *this; }
-		const_iterator operator++(int) { const_iterator tmp = *this; ++(*this); return tmp; }
-		bool operator==(const const_iterator& other) const { return it == other.it; }
-	};
-
+	iterator begin() { return v.data(); }
+	iterator end() { return v.data() + v.size(); }
 	const_iterator begin() const { return v.data(); }
 	const_iterator end() const { return v.data() + v.size(); }
 
-	inline int key(int64_t id) const {
-		return id % buckets.size();
+	const_iterator find(const int64_t id) const {
+		if(buckets.empty()) return end();
+		int b = key(id);
+		for(int i = buckets[b]; i != -1; i = v[i].nxt)
+			if(v[i].kv.first == id) return &v[i];
+		return end();
 	}
 
 	T& operator[](const int64_t id) {
 		if(buckets.empty()) buckets.assign(primes[0], -1);
 		int b = key(id);
 		for(int i = buckets[b]; i != -1; i = v[i].nxt)
-			if(v[i].id == id) return v[i].v;
+			if(v[i].kv.first == id) return v[i].kv.second;
 		if(v.size() >= buckets.size()) {
 			rehash(nextSize(v.size()+1));
 			b = key(id);
 		}
 		const int i = (int) v.size();
-		T& ans = v.emplace_back(id, buckets[b]).v;
+		T& ans = v.emplace_back(id, buckets[b]).kv.second;
 		buckets[b] = i;
 		return ans;
+	}
+
+	bool contains(const int64_t id) const {
+		return find(id) != end();
 	}
 
 	size_t size() const {
@@ -80,7 +109,7 @@ protected:
 		buckets.assign(s, -1);
 		const int V = v.size();
 		for(int i = 0; i < V; ++i) {
-			const int b = key(v[i].id);
+			const int b = key(v[i].kv.first);
 			v[i].nxt = buckets[b];
 			buckets[b] = i;
 		}

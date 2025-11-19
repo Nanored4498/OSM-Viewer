@@ -139,9 +139,11 @@ void Window::start() {
 		progs.main.use();
 
 		// Render forests
-		// TODO: draw trees icon either with frag shader or with texture
-		progs.main.set_color(0.675f, 0.824f, 0.612f);
-		glDrawElements(GL_TRIANGLES, forestsCount, GL_UNSIGNED_INT, 0);
+		if(scale > 26e3f) {
+			// TODO: draw trees icon either with frag shader or with texture
+			progs.main.set_color(0.675f, 0.824f, 0.612f);
+			glDrawElements(GL_TRIANGLES, forestsCount, GL_UNSIGNED_INT, 0);
+		}
 
 		// Render roads
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);

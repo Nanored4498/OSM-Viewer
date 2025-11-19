@@ -60,13 +60,30 @@ constexpr RoadType roadTypes[] {
 	{"primary",  {0.992f, 0.843f, 0.631f}, {0.671f, 0.482f, 0.012f}, false},
 	{"river",    {0.667f, 0.827f, 0.875f}, {0.667f, 0.827f, 0.875f}, false},
 };
-vector<pair<int64_t, vector<int64_t>>> roads[std::size(roadTypes)], countryBorders;
-vector<pair<string, int64_t>> capitals;
+HashMap<vector<int64_t>> roads[std::size(roadTypes)], countryBorders;
+vector<pair<string, int64_t>> capitals, mainRoads;
 vector<int64_t> mainRivers;
 
 vector<vector<int64_t>> forests;
 
 constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
+
+consteval HashMap<vector<int64_t>>& getRoadsByName(const string &name) {
+	return roads[ranges::find(roadTypes, name, [&](const RoadType &rt) {
+			return rt.name;
+	}) - roadTypes];
+}
+constexpr auto &motorways = getRoadsByName("motorway");
+constexpr auto &rivers = getRoadsByName("river");
+
+void addMainRoad(const string_view &name, const vector<int64_t> &mems) {
+	for(const int64_t mem : mems) {
+		auto it = motorways.find(mem);
+		if(it == motorways.end()) continue;
+		mainRoads.emplace_back(name, it->second[0]);
+		break;
+	}
+}
 
 int main() {
 	BinStream input(MAP_DIR "/lorraine-latest.osm.pbf");
@@ -128,11 +145,11 @@ int main() {
 						const string_view key = getString(way.keys[i]);
 						const string_view val = getString(way.vals[i]);
 						if(key == "highway" || key == "waterway") {
-							const int i = ranges::find(roadTypes, val, [&](const RoadType &rt) {
+							const ptrdiff_t i = ranges::find(roadTypes, val, [&](const RoadType &rt) {
 								return rt.name;
 							}) - roadTypes;
-							if(i < (int) std::size(roadTypes))
-								roads[i].emplace_back(way.id, way.refs);
+							if(i < (ptrdiff_t) std::size(roadTypes))
+								roads[i][way.id] = move(way.refs);
 						} else if(key == "boundary") {
 							if(val == "administrative")
 								is_boundary = true;
@@ -149,7 +166,7 @@ int main() {
 					}
 					if(is_boundary && admin_level != -1 && admin_level <= 4) {
 						// TODO: different rendering depending on admin level
-						countryBorders.emplace_back(way.id, move(way.refs));
+						countryBorders[way.id] = move(way.refs);
 					} else if(is_forest) {
 						if(way.refs[0] != way.refs.back()) THROW_ERROR("Not closed");
 						way.refs.pop_back();
@@ -187,14 +204,13 @@ int main() {
 						for(int i = 0; i < M; ++i) {
 							memid += relation.memids[i];
 							if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
-							const string role(ST[relation.roles_sid[i]].begin(), ST[relation.roles_sid[i]].end());
-							if(role != "main_stream") continue;
-							mainRivers.push_back(memid);
+							const string_view role = getString(relation.roles_sid[i]);
+							if(role == "main_stream" && rivers.contains(memid))
+								mainRivers.push_back(memid);
 						}
 					}
-					if(isRoute && (network == "FR:A-road" || network == "FR:N-road")) {
-						cout << ref << endl;
-					}
+					if(isRoute && (network == "FR:A-road" || network == "FR:N-road"))
+						addMainRoad(ref, relation.memids);
 				}
 				if(pg._has_dense) {
 					const Proto::DenseNodes &dense = pg.dense;
@@ -210,7 +226,7 @@ int main() {
 						vec2l &node = nodes[id];
 						node.x = pb.lon_offset + pb.granularity * lon;
 						node.y = pb.lat_offset + pb.granularity * lat;
-						string place, name;
+						string_view place, name;
 						int capital = -1;
 						while(*kv_it) {
 							const string_view key = getString(*(kv_it++));
@@ -235,28 +251,6 @@ int main() {
 				}
 			}
 		} else THROW_ERROR("Not recognized blob type: " + header.type);
-	}
-
-	{ // Only keep main rivers
-		auto &rivers = roads[ranges::find(roadTypes, "river", [&](const RoadType &rt) {
-			return rt.name;
-		}) - roadTypes];
-		ranges::sort(rivers, less<int64_t>{},
-			[](const decltype(rivers[0]) &r) {
-				return r.first;
-			}
-		);
-		ranges::sort(mainRivers);
-		auto good = mainRivers.begin();
-		int n = 0;
-		for(auto &r : rivers) {
-			while(good != mainRivers.end() && *good < r.first)
-				++ good;
-			if(good == mainRivers.end()) break;
-			if(r.first != *good) continue;
-			rivers[n++] = std::move(r);
-		}
-		rivers.resize(n);
 	}
 
 	// Create window
@@ -284,8 +278,13 @@ int main() {
 		wr.b2 = roadTypes[i].col2.b;
 		wr.border = roadTypes[i].border;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
-		CMDcount += (wr.count = roads[i].size());
-		for(const auto &r : roads[i] | views::values) VBOcount += r.size();
+		if(&roads[i] == &rivers) {
+			CMDcount += (wr.count = mainRivers.size());
+			for(int64_t rid : mainRivers) VBOcount += roads[i][rid].size();
+		} else {
+			CMDcount += (wr.count = roads[i].size());
+			for(const auto &r : roads[i] | views::values) VBOcount += r.size();
+		}
 	}
 	{ // Country border
 		Window::Road &wr = window.roads.emplace_back();
@@ -299,8 +298,7 @@ int main() {
 	}
 	// Capitals points
 	window.capitalsFirst = VBOcount;
-	window.capitalsCount = capitals.size();
-	VBOcount += capitals.size();
+	VBOcount += (window.capitalsCount = capitals.size());
 	// Forests
 	uint32_t forestsFirst = VBOcount;
 	window.forestsCount = 0;
@@ -322,19 +320,26 @@ int main() {
 	GLuint *indMap = (GLuint*) glMapNamedBuffer(EBO, GL_WRITE_ONLY);
 	GLuint *cmdMap = (GLuint*) glMapNamedBuffer(window.cmdBuffer, GL_WRITE_ONLY);
 	VBOcount = 0;
-	const auto writeRoads2GPU = [&](const vector<pair<int64_t, vector<int64_t>>> &roads) {
-		for(const auto &r : roads | views::values) {
-			*(cmdMap++) = r.size(); // count
-			*(cmdMap++) = 1; // instanceCount
-			*(cmdMap++) = VBOcount; // first
-			*(cmdMap++) = 0; // baseInstance
-			for(const int64_t id : r)
-				*(bufMap++) = mercator(nodes[id]);
-			VBOcount += r.size();
-		}
+	const auto writeRoad2GPU = [&](const vector<int64_t> &road) {
+		*(cmdMap++) = road.size(); // count
+		*(cmdMap++) = 1; // instanceCount
+		*(cmdMap++) = VBOcount; // first
+		*(cmdMap++) = 0; // baseInstance
+		for(const int64_t id : road)
+			*(bufMap++) = mercator(nodes[id]);
+		VBOcount += road.size();
 	};
-	for(const auto &roads : roads) writeRoads2GPU(roads);
-	writeRoads2GPU(countryBorders);
+	for(const auto &roads : roads) {
+		if(&roads == &rivers) {
+			for(const int64_t &rid : mainRivers)
+				writeRoad2GPU(roads.find(rid)->second);
+		} else {
+			for(const auto &road : roads | views::values)
+				writeRoad2GPU(road);
+		}
+	}
+	for(const auto &road : countryBorders | views::values)
+		writeRoad2GPU(road);
 	for(const int64_t id : capitals | views::elements<1>)
 		*(bufMap++) = mercator(nodes[id]);
 	for(const auto &forest : forests) {
@@ -360,11 +365,13 @@ int main() {
 	// Capitals text SSBO
 	glCreateBuffers(1, &window.textSSBO);
 	window.charactersCount = 0;
-	for(const string &name : capitals | views::elements<0>)
+	for(auto txts : {&capitals, &mainRoads})
+	for(const string &name : *txts | views::elements<0>)
 		window.charactersCount += name.size();
 	glNamedBufferStorage(window.textSSBO, window.charactersCount * 5 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
 	bufMap = (vec2f*) glMapNamedBuffer(window.textSSBO, GL_WRITE_ONLY);
-	for(const auto &[name, id] : capitals) {
+	for(auto txts : {&capitals, &mainRoads})
+	for(const auto &[name, id] : *txts) {
 		if(name.empty()) continue;
 		const vec2f txtCenter = mercator(nodes[id]);
 		vec2f offset(0.f, numeric_limits<float>::max());
