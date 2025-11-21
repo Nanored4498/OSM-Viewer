@@ -5,8 +5,7 @@
 #version 460
 
 in vec2 uv;
-// TODO: use flat or gl_PrimitiveID/gl_InstanceID with SSBO
-in vec2 size;
+flat in vec2 size;
 
 out vec4 fragColor;
 

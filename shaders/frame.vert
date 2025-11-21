@@ -18,7 +18,7 @@ layout (binding = 0, std430) readonly buffer ssbo {
 };
 
 out vec2 uv;
-out vec2 size;
+flat out vec2 size;
 
 const vec2 off[6] = vec2[6](
 	vec2(0., 0.),
