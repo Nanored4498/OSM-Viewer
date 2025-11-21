@@ -28,7 +28,9 @@ struct Window {
 	int width = 800;
 	int height = 600;
 
-	GLuint UBO, VAO, cmdBuffer, textSSBO;
+	GLuint UBO;
+	GLuint VAO, cmdBuffer;
+	GLuint textVAO, frameSSBO;
 	Programs progs;
 	Font::Atlas atlas;
 
@@ -47,6 +49,5 @@ struct Window {
 	GLsizei capitalsCount;
 	GLsizei charactersCount;
 	GLsizei forestsCount;
-	GLintptr framesOffset;
 	GLsizei framesCount;
 };

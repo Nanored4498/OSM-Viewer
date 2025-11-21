@@ -171,14 +171,14 @@ void Window::start() {
 
 		// Render frames
 		progs.frame.use();
-		progs.frame.bind_ssbo_range(textSSBO, framesOffset, 3*sizeof(vec2f)*framesCount);
+		progs.frame.bind_ssbo(frameSSBO);
 		glDrawArrays(GL_TRIANGLES, 0, 6*framesCount);
 	
 		// Render text
+		glBindVertexArray(textVAO);
 		progs.text.use();
-		progs.text.bind_ssbo(textSSBO);
-		progs.text.set_color(1.f, 1.f, 1.f);
-		glDrawArrays(GL_TRIANGLES, 0, 6*charactersCount);
+		progs.text.set_color(0.f, 0.f, 0.f);
+		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, charactersCount);
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

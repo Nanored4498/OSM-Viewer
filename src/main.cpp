@@ -358,23 +358,24 @@ int main() {
 
 	// VAO
 	glCreateVertexArrays(1, &window.VAO);
-	glVertexArrayVertexBuffer(window.VAO, 0, VBO, 0, 2 * sizeof(float));
+	glVertexArrayVertexBuffer(window.VAO, 0, VBO, 0, sizeof(vec2f));
 	glVertexArrayElementBuffer(window.VAO, EBO);
 	window.progs.main.bind_p(window.VAO, 0, 0);
 
-	// Text SSBO
-	glCreateBuffers(1, &window.textSSBO);
+	// Text VBO, VAO and frames SSBO
 	window.charactersCount = 0;
 	window.framesCount = mainRoads.size();
 	for(auto txts : {&capitals, &mainRoads})
 	for(const string &name : *txts | views::elements<0>)
 		window.charactersCount += name.size();
-	window.framesOffset = window.charactersCount * 5 * sizeof(vec2f);
-	glNamedBufferStorage(window.textSSBO,
-		(window.charactersCount * 5 + window.framesCount * 3) * sizeof(vec2f),
-		nullptr, GL_MAP_WRITE_BIT);
-	bufMap = (vec2f*) glMapNamedBuffer(window.textSSBO, GL_WRITE_ONLY);
-	vec2f* frameMap = bufMap + 5 * window.charactersCount;
+
+	GLuint textVBO;
+	glCreateBuffers(1, &textVBO);
+	glNamedBufferStorage(textVBO, window.charactersCount * 5 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
+	glCreateBuffers(1, &window.frameSSBO);
+	glNamedBufferStorage(window.frameSSBO, window.framesCount * 3 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
+	bufMap = (vec2f*) glMapNamedBuffer(textVBO, GL_WRITE_ONLY);
+	vec2f* frameMap = (vec2f*) glMapNamedBuffer(window.frameSSBO, GL_WRITE_ONLY);
 	for(auto txts : {&capitals, &mainRoads})
 	for(const auto &[name, id] : *txts) {
 		if(name.empty()) continue;
@@ -413,7 +414,17 @@ int main() {
 			offset.x += cp.xadvance;
 		}
 	}
-	glUnmapNamedBuffer(window.textSSBO);
+	glUnmapNamedBuffer(textVBO);
+	glUnmapNamedBuffer(window.frameSSBO);
+
+	glCreateVertexArrays(1, &window.textVAO);
+	glVertexArrayVertexBuffer(window.textVAO, 0, textVBO, 0, 5 * sizeof(vec2f));
+	glVertexArrayBindingDivisor(window.textVAO, 0, 1);
+	window.progs.text.bind_txtCenter(window.textVAO, 0, 0);
+	window.progs.text.bind_offset(window.textVAO, 0, 1 * sizeof(vec2f));
+	window.progs.text.bind_size(window.textVAO, 0, 2 * sizeof(vec2f));
+	window.progs.text.bind_uv(window.textVAO, 0, 3 * sizeof(vec2f));
+	window.progs.text.bind_uvSize(window.textVAO, 0, 4 * sizeof(vec2f));
 
 	window.start();
 
