@@ -5,7 +5,7 @@
 #version 460
 
 in vec2 uv;
-flat in vec2 size;
+flat in vec2 vSize;
 
 out vec4 fragColor;
 
@@ -15,9 +15,9 @@ const float d2 = 1. + 1./(2.*border);
 
 void main() {
 	vec2 duv = vec2(1.)-abs(uv);
-	bvec2 comp = lessThan(duv, size);
+	bvec2 comp = lessThan(duv, vSize);
 	if(all(comp)) {
-		duv /= size;
+		duv /= vSize;
 		duv = vec2(1.)-duv;
 		float d = dot(duv, duv);
 		if(d > d2*d2) discard;

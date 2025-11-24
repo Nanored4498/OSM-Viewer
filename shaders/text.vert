@@ -12,8 +12,10 @@ layout (location = 1) in vec2 offset;
 layout (location = 2) in vec2 size;
 layout (location = 3) in vec2 uv;
 layout (location = 4) in vec2 uvSize;
+layout (location = 5) in vec3 color;
 
-out vec2 UV;
+out vec2 vUV;
+flat out vec3 vColor;
 
 const vec2 off[4] = vec2[4](
 	vec2(0., 0.),
@@ -26,7 +28,8 @@ void main() {
 	vec2 o = off[gl_VertexID];
 
 	vec2 offset = offset + o * size;
-	UV = uv + o * uvSize;
+	vUV = uv + o * uvSize;
+	vColor = color;
 
 	gl_Position = vec4(scale*(txtCenter - center) + txtScale*offset, 0., 1.);
 }

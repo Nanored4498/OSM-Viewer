@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // See <https://www.gnu.org/licenses/>
 
+#include <algorithm>
 #include <concepts>
 #include <filesystem>
 #include <fstream>
@@ -46,6 +47,9 @@ struct Prog {
 	vector<Uniform> uniforms;
 	vector<Buffer> buffers;
 	vector<UBO> ubos;
+	bool hasAttribsStruct() const {
+		return !attributes.empty() && attributes.back().index+1 == (GLuint) attributes.size();
+	}
 };
 
 static filesystem::path shaderDir;
@@ -119,9 +123,22 @@ void getRessources(GLuint prog, vector<Ressource> &ressources, const Fun &f) {
 	}
 }
 
+static const char* getTypeFullName(GLuint type) {
+	switch(type) {
+	case GL_FLOAT_VEC2:
+		return "vec2f";
+	case GL_FLOAT_VEC3:
+		return "vec3f";
+	default:
+		cerr << "Unknown type: " << hex << type << dec << " (" << __FILE__ << ':' << __LINE__ << ")\n";
+		exit(1);
+	}
+};
+
 static const char* getTypeName(GLuint type) {
 	switch(type) {
 	case GL_FLOAT_VEC2:
+	case GL_FLOAT_VEC3:
 		return "GL_FLOAT";
 	default:
 		cerr << "Unknown type: " << hex << type << dec << " (" << __FILE__ << ':' << __LINE__ << ")\n";
@@ -133,6 +150,8 @@ static GLuint getTypeSize(GLuint type) {
 	switch(type) {
 	case GL_FLOAT_VEC2:
 		return 2;
+	case GL_FLOAT_VEC3:
+		return 3;
 	default:
 		cerr << "Unknown type: " << hex << type << dec << " (" << __FILE__ << ':' << __LINE__ << ")\n";
 		exit(1);
@@ -208,6 +227,7 @@ int main(int argc, char* argv[]) {
 				prog.attributes.pop_back();
 			} else ++i;
 		}
+		ranges::sort(prog.attributes, less<GLuint>{}, [&](const Attribute &a) { return a.index; });
 		getRessources<GL_UNIFORM, GL_LOCATION, GL_TYPE>(prg, prog.uniforms, [](Uniform &u, GLint* vals) {
 			u.index = vals[1];
 			u.type = vals[2];
@@ -235,6 +255,7 @@ int main(int argc, char* argv[]) {
 	// Generate header
 	ofstream Hfile(outputDir / "programs.h");
 	Hfile << R"lim(#include "glad/gl.h"
+#include "vec.h"
 
 struct Programs {
 	void init();
@@ -255,8 +276,17 @@ struct Programs {
 	};
 )lim";
 
-	for(const Prog &prog : progs) {
-		Hfile << "\n\tstruct : Program {\n";
+	for(const Prog &prog : progs) {	
+		string typeName = prog.name;
+		typeName[0] = toupper(typeName[0]);
+		Hfile << "\n\tstruct " << typeName << " : Program {\n";
+		if(prog.hasAttribsStruct()) {
+			Hfile << "\t\tstruct Attribs {\n";
+			for(const Attribute &a : prog.attributes)
+				Hfile << "\t\t\t" << getTypeFullName(a.type) << ' ' << a.name << ";\n";
+			Hfile << "\t\t};\n\n";
+			Hfile << "\t\tvoid canonical_bind(GLuint VAO, GLuint bindingIndex) const;\n";
+		}
 		for(const Attribute &a : prog.attributes) {
 			Hfile << "\t\tinline void bind_" << a.name << "(GLuint VAO, GLuint bindingIndex, GLuint offset) const {\n";
 			Hfile << "\t\t\t__bind<" << a.index << ", " << getTypeSize(a.type) << ", " << getTypeName(a.type) << ">(VAO, bindingIndex, offset);\n";
@@ -384,6 +414,18 @@ void Programs::Program::init(GLuint vertexShader, GLuint fragmentShader) {
 	for(const auto &name : fragShaders | views::elements<0>)
 		Cfile << "\tglDeleteShader(frag_" << name << ");\n";
 	Cfile << "}\n";
+
+	for(const Prog &prog : progs) {	
+		string typeName = prog.name;
+		typeName[0] = toupper(typeName[0]);
+		if(prog.hasAttribsStruct()) {
+			Cfile << "\nvoid Programs::" << typeName << "::canonical_bind(GLuint VAO, GLuint bindingIndex) const {\n";
+			for(const Attribute &a : prog.attributes)
+				Cfile << "\tbind_" << a.name << "(VAO, bindingIndex, offsetof(Attribs, " << a.name << "));\n";
+			Cfile << "}\n";
+		}
+	}
+
 	Cfile.close();
 
 	return 0;

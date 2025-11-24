@@ -150,6 +150,7 @@ void Window::start() {
 		}
 
 		// Render roads
+		// TODO: rivers should be rendered before road borders
 		// TODO: Use one glMultiDrawArraysIndirect and remove color uniform for a SSBO of color per draw using gl_DrawID
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
 		glLineWidth(5.f);
@@ -170,14 +171,13 @@ void Window::start() {
 		glDrawArrays(GL_POINTS, capitalsFirst, capitalsCount);
 
 		// Render frames
+		glBindVertexArray(frameVAO);
 		progs.frame.use();
-		progs.frame.bind_ssbo(frameSSBO);
-		glDrawArrays(GL_TRIANGLES, 0, 6*framesCount);
+		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, framesCount);
 	
 		// Render text
 		glBindVertexArray(textVAO);
 		progs.text.use();
-		progs.text.set_color(0.f, 0.f, 0.f);
 		glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, charactersCount);
 
 		glfwSwapBuffers(window);

@@ -81,6 +81,18 @@ struct vec2T : vec_base<2, T, vec2T<T>> {
 using vec2f = vec2T<float>;
 using vec2l = vec2T<int64_t>;
 
+template <typename T>
+struct vec3T : vec_base<3, T, vec3T<T>> {
+	union {T x; T r;};
+	union {T y; T g;};
+	union {T z; T b;};
+	vec3T() = default;
+	vec3T(T x, T y, T z): x(x), y(y), z(z) {}
+	template<int M, typename U, typename W>
+	vec3T(const vec_base<M, U, W> &other): vec_base<3, T, vec3T>(other) {}
+};
+using vec3f = vec3T<float>;
+
 template<typename V>
 struct Box {
 	V min, max;

@@ -362,7 +362,7 @@ int main() {
 	glVertexArrayElementBuffer(window.VAO, EBO);
 	window.progs.main.bind_p(window.VAO, 0, 0);
 
-	// Text VBO, VAO and frames SSBO
+	// Text VBO
 	window.charactersCount = 0;
 	window.framesCount = mainRoads.size();
 	for(auto txts : {&capitals, &mainRoads})
@@ -371,11 +371,12 @@ int main() {
 
 	GLuint textVBO;
 	glCreateBuffers(1, &textVBO);
-	glNamedBufferStorage(textVBO, window.charactersCount * 5 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
-	glCreateBuffers(1, &window.frameSSBO);
-	glNamedBufferStorage(window.frameSSBO, window.framesCount * 3 * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
-	bufMap = (vec2f*) glMapNamedBuffer(textVBO, GL_WRITE_ONLY);
-	vec2f* frameMap = (vec2f*) glMapNamedBuffer(window.frameSSBO, GL_WRITE_ONLY);
+	glNamedBufferStorage(textVBO,
+			window.charactersCount * sizeof(Programs::Text::Attribs)
+			+ window.framesCount * sizeof(Programs::Frame::Attribs),
+			nullptr, GL_MAP_WRITE_BIT);
+	Programs::Text::Attribs *txtMap = (decltype(txtMap)) glMapNamedBuffer(textVBO, GL_WRITE_ONLY);
+	Programs::Frame::Attribs *frmMap = (decltype(frmMap)) (txtMap + window.charactersCount);
 	for(auto txts : {&capitals, &mainRoads})
 	for(const auto &[name, id] : *txts) {
 		if(name.empty()) continue;
@@ -396,35 +397,38 @@ int main() {
 		if(txts == &capitals) offset.y -= 6.f;
 		if(txts == &mainRoads) {
 			constexpr float margin = 6.f;
-			*(frameMap++) = txtCenter;
-			*(frameMap++) = offset + vec2f(x0-margin, -y1-margin);
-			frameMap->x     = x1 - x0 + 2.f*margin;
-			(frameMap++)->y = y1 - offset.y + 2.f*margin;
+			frmMap->txtCenter = txtCenter;
+			frmMap->offset = offset + vec2f(x0-margin, -y1-margin);
+			frmMap->size.x = x1 - x0 + 2.f*margin;
+			frmMap->size.y = y1 - offset.y + 2.f*margin;
+			++frmMap;
 		}
 		for(int c : name) {
 			const auto &cp = window.atlas.charPositions[c - Font::firstChar];
-			*(bufMap++) = txtCenter;
-			*(bufMap++) = offset + vec2f(cp.xoff, -cp.yoff);
-			bufMap->x     = cp.x1 - cp.x0;
-			(bufMap++)->y = cp.y0 - cp.y1;
-			bufMap->x     = (float) cp.x0 / window.atlas.width;
-			(bufMap++)->y = (float) cp.y0 / window.atlas.height;
-			bufMap->x     = float(cp.x1 - cp.x0) / window.atlas.width;
-			(bufMap++)->y = float(cp.y1 - cp.y0) / window.atlas.height;
+			txtMap->txtCenter = txtCenter;
+			txtMap->offset = offset + vec2f(cp.xoff, -cp.yoff);
+			txtMap->size.x = cp.x1 - cp.x0;
+			txtMap->size.y = cp.y0 - cp.y1;
+			txtMap->uv.x = (float) cp.x0 / window.atlas.width;
+			txtMap->uv.y = (float) cp.y0 / window.atlas.height;
+			txtMap->uvSize.x = float(cp.x1 - cp.x0) / window.atlas.width;
+			txtMap->uvSize.y = float(cp.y1 - cp.y0) / window.atlas.height;
+			txtMap->color = txts == &capitals ? vec3f(0.f, 0.f, 0.f) : vec3f(1.f, 1.f, 1.f);
+			++ txtMap;
 			offset.x += cp.xadvance;
 		}
 	}
 	glUnmapNamedBuffer(textVBO);
-	glUnmapNamedBuffer(window.frameSSBO);
 
+	// Text VAO
 	glCreateVertexArrays(1, &window.textVAO);
-	glVertexArrayVertexBuffer(window.textVAO, 0, textVBO, 0, 5 * sizeof(vec2f));
+	glVertexArrayVertexBuffer(window.textVAO, 0, textVBO, 0, sizeof(Programs::Text::Attribs));
 	glVertexArrayBindingDivisor(window.textVAO, 0, 1);
-	window.progs.text.bind_txtCenter(window.textVAO, 0, 0);
-	window.progs.text.bind_offset(window.textVAO, 0, 1 * sizeof(vec2f));
-	window.progs.text.bind_size(window.textVAO, 0, 2 * sizeof(vec2f));
-	window.progs.text.bind_uv(window.textVAO, 0, 3 * sizeof(vec2f));
-	window.progs.text.bind_uvSize(window.textVAO, 0, 4 * sizeof(vec2f));
+	window.progs.text.canonical_bind(window.textVAO, 0);
+	glCreateVertexArrays(1, &window.frameVAO);
+	glVertexArrayVertexBuffer(window.frameVAO, 0, textVBO, window.charactersCount * sizeof(Programs::Text::Attribs), sizeof(Programs::Frame::Attribs));
+	glVertexArrayBindingDivisor(window.frameVAO, 0, 1);
+	window.progs.frame.canonical_bind(window.frameVAO, 0);
 
 	window.start();
 

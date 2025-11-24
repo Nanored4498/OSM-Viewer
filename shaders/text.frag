@@ -4,14 +4,14 @@
 
 #version 460
 
-in vec2 UV;
+in vec2 vUV;
+flat in vec3 vColor;
 
 out vec4 fragColor;
 
 uniform sampler2D fontAtlas;
-uniform vec3 color;
 
 void main() {
-	float alpha = texture(fontAtlas, UV).r;
-	fragColor = vec4(color, alpha);
+	float alpha = texture(fontAtlas, vUV).r;
+	fragColor = vec4(vColor, alpha);
 }

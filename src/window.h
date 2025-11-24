@@ -30,7 +30,7 @@ struct Window {
 
 	GLuint UBO;
 	GLuint VAO, cmdBuffer;
-	GLuint textVAO, frameSSBO;
+	GLuint textVAO, frameVAO;
 	Programs progs;
 	Font::Atlas atlas;
 
