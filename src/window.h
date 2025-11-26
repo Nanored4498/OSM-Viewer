@@ -32,6 +32,7 @@ struct Window {
 	GLuint VAO, cmdBuffer;
 	GLuint textVAO, frameVAO;
 	Programs progs;
+	Font::CharPositions capitalFont, roadFont;
 	Font::Atlas atlas;
 
 	float centerX, centerY, scale;

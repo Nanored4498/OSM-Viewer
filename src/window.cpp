@@ -99,7 +99,17 @@ void Window::init(const vec2f &v0, const vec2f &v1) {
 	scale = 2.f * min(width/(v1.x - v0.x), height/(v1.y - v0.y));
 
 	// Load fonts
-	atlas = Font::getTTFAtlas(FONT_DIR "/Roboto-Medium.ttf", 22.f);
+	atlas = Font::getTTFAtlas({
+		{
+			capitalFont,
+			FONT_DIR "/Roboto-Medium.ttf",
+			24.f
+		}, {
+			roadFont,
+			FONT_DIR "/Roboto-Bold.ttf",
+			16.f
+		}
+	});
 	GLuint fontAtlasTexture;
 	glGenTextures(1, &fontAtlasTexture);
 	glActiveTexture(GL_TEXTURE0);

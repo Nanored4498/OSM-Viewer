@@ -4,10 +4,11 @@
 
 #include "font.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
-#include <vector>
+#include <numeric>
 
 #include "utils.h"
 
@@ -217,17 +218,16 @@ static void getGlyphRects(const TTFData &info, const float fontSize, GlyphRect *
 	}
 }
 
-static Atlas packRects(GlyphRect *rects) {
+static Atlas packRects(GlyphRect *rects, int size) {
 	constexpr int padding = 1;
 	Atlas atlas;
 	atlas.width = 256;
 	int x = padding, y = padding, rowHeight = 0;
-	uint32_t order[charCount];
-	for(uint32_t i = 0; i < charCount; ++i) order[i] = i;
-	sort(order, order+charCount, [&](uint32_t i, uint32_t j) {
-		return rects[i].h < rects[j].h;
-	});
-	for(uint32_t i : order) {
+	unique_ptr<int[]> order(new int[size]);
+	span<int> orderSpan(order.get(), size);
+	ranges::iota(orderSpan, 0);
+	ranges::sort(orderSpan, less<int>{}, [&](int i) { return rects[i].h; });
+	for(const int i : orderSpan) {
 		if(rects[i].missing) continue;
 		if(x + rects[i].w + padding > atlas.width) {
 			x = padding;
@@ -702,7 +702,7 @@ static void renderGlyph(const TTFData &info, uint8_t *img, const int imgWidth, c
 	}
 }
 
-static void renderGlyphs(Atlas &atlas, const TTFData &info, const float fontSize, GlyphRect *rects) {
+static void renderGlyphs(Atlas &atlas, CharPositions &charPositions, const TTFData &info, const float fontSize, GlyphRect *rects) {
 	int missing_glyph = -1;
 	const float scale = getScale(info, fontSize);
 	const uint16_t numOfLongHorMetrics = readUint16(info.hhea + 34);
@@ -711,7 +711,7 @@ static void renderGlyphs(Atlas &atlas, const TTFData &info, const float fontSize
 		if(r.missing) {
 			if(missing_glyph == -1)
 				THROW_ERROR("Missing glyph encountered too early");
-			atlas.charPositions[j] = atlas.charPositions[missing_glyph];
+			charPositions[j] = charPositions[missing_glyph];
 			continue;
 		}
 	
@@ -724,7 +724,7 @@ static void renderGlyphs(Atlas &atlas, const TTFData &info, const float fontSize
 
 		const uint16_t advanceWidth = readInt16(info.hmtx + 4*min(glyphID, numOfLongHorMetrics-1));
 		const auto [x0,y0,x1,y1] = getGlyphBox(info, glyphID, scale);
-		CharPosition &cp = atlas.charPositions[j];
+		CharPosition &cp = charPositions[j];
 		cp.x0       = r.x;
 		cp.y0       = r.y;
 		cp.x1       = r.x + r.w;
@@ -737,24 +737,62 @@ static void renderGlyphs(Atlas &atlas, const TTFData &info, const float fontSize
 	}
 }
 
-Atlas getTTFAtlas(const char* fileName, const float fontSize) {
-	ifstream f(fileName);
-	f.seekg(0, ios::end);
-	const size_t size = f.tellg();
-	f.seekg(0, ios::beg);
-	unique_ptr<uint8_t[]> fontData(new uint8_t[size]);
-	f.read(reinterpret_cast<char*>(fontData.get()), size);
+Atlas getTTFAtlas(const vector<Entry> &entries) {
+	// order entries
+	unique_ptr<int[]> order(new int[entries.size()]);
+	span<int> orderSpan(order.get(), entries.size());
+	ranges::iota(orderSpan, 0);
+	ranges::sort(orderSpan, [&](int i, int j) {
+		return strcmp(entries[i].fileName, entries[j].fileName) < 0;
+	});
 
-	// Check tag (Only support OpenType 1.0)
-	if(memcmp(reinterpret_cast<char*>(fontData.get()), "\0\1\0\0", 4))
-		THROW_ERROR("bad TTF tag");
+	// Font file data
+	const char* fileName = nullptr;
+	size_t fileSize = 0;
+	unique_ptr<uint8_t[]> fileData;
+	TTFData info;
 
-	GlyphRect rects[charCount];
+	// Read TTF file
+	const auto readTTF = [&](const char* eFileName) {
+		if(fileName && !strcmp(fileName, eFileName)) return;
+		fileName = eFileName;
+		ifstream f(fileName);
+		f.seekg(0, ios::end);
+		const size_t size = f.tellg();
+		if(size > fileSize) {
+			fileSize = size;
+			fileData.reset(new uint8_t[size]);
+		}
+		f.seekg(0, ios::beg);
+		f.read(reinterpret_cast<char*>(fileData.get()), size);
+		f.close();
+		// Check tag (Only support OpenType 1.0)
+		if(memcmp(reinterpret_cast<char*>(fileData.get()), "\0\1\0\0", 4))
+			THROW_ERROR("bad TTF tag");
+		info = findAllTables(fileData.get());
+	};
 
-	TTFData info = findAllTables(fontData.get());
-	getGlyphRects(info, fontSize, rects);
-	Atlas atlas = packRects(rects);
-	renderGlyphs(atlas, info, fontSize, rects);
+	// get rects
+	unique_ptr<GlyphRect[]> rects(new GlyphRect[charCount * entries.size()]);
+	GlyphRect* current = rects.get();
+	for(const int i : orderSpan) {
+		const Entry &entry = entries[i];
+		readTTF(entry.fileName);
+		getGlyphRects(info, entry.fontSize, current);
+		current += charCount;
+	}
+
+	// pack atlas
+	Atlas atlas = packRects(rects.get(), charCount * entries.size());
+
+	// render
+	current = rects.get();
+	for(const int i : orderSpan) {
+		const Entry &entry = entries[i];
+		readTTF(entry.fileName);
+		renderGlyphs(atlas, entry.positions, info, entry.fontSize, current);
+		current += charCount;
+	}
 	return atlas;
 }
 

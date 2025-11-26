@@ -21,7 +21,7 @@ const vec2 off[4] = vec2[4](
 	vec2(1., 1.)
 );
 
-const float border = 4.;
+const float border = 2.67;
 
 void main() {
 	uv = off[gl_VertexID];

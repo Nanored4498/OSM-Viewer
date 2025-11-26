@@ -9,7 +9,7 @@ flat in vec2 vSize;
 
 out vec4 fragColor;
 
-const float border = 4.;
+const float border = 2.67;
 const float d1 = 1. - 1./(2.*border);
 const float d2 = 1. + 1./(2.*border);
 

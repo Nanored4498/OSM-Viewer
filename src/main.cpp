@@ -377,45 +377,47 @@ int main() {
 			nullptr, GL_MAP_WRITE_BIT);
 	Programs::Text::Attribs *txtMap = (decltype(txtMap)) glMapNamedBuffer(textVBO, GL_WRITE_ONLY);
 	Programs::Frame::Attribs *frmMap = (decltype(frmMap)) (txtMap + window.charactersCount);
-	for(auto txts : {&capitals, &mainRoads})
-	for(const auto &[name, id] : *txts) {
-		if(name.empty()) continue;
-		const vec2f txtCenter = mercator(nodes[id]);
-		vec2f offset(0.f, numeric_limits<float>::max());
-		float y1 = numeric_limits<float>::min();
-		for(int c : name) {
-			const auto &pc = window.atlas.charPositions[c - Font::firstChar];
-			offset.x += pc.xadvance;
-			offset.y = min(offset.y, pc.yoff);
-			y1 = max(y1, pc.yoff + pc.y1 - pc.y0);
-		}
-		const auto &cp0 = window.atlas.charPositions[name[0] - Font::firstChar];
-		const auto &cp1 = window.atlas.charPositions[name.back() - Font::firstChar];
-		const float x0 = cp0.xoff;
-		const float x1 = offset.x - cp1.xadvance + cp1.xoff + cp1.x1 - cp1.x0;
-		offset.x = - (x0 + x1) / 2.f;
-		if(txts == &capitals) offset.y -= 6.f;
-		if(txts == &mainRoads) {
-			constexpr float margin = 6.f;
-			frmMap->txtCenter = txtCenter;
-			frmMap->offset = offset + vec2f(x0-margin, -y1-margin);
-			frmMap->size.x = x1 - x0 + 2.f*margin;
-			frmMap->size.y = y1 - offset.y + 2.f*margin;
-			++frmMap;
-		}
-		for(int c : name) {
-			const auto &cp = window.atlas.charPositions[c - Font::firstChar];
-			txtMap->txtCenter = txtCenter;
-			txtMap->offset = offset + vec2f(cp.xoff, -cp.yoff);
-			txtMap->size.x = cp.x1 - cp.x0;
-			txtMap->size.y = cp.y0 - cp.y1;
-			txtMap->uv.x = (float) cp.x0 / window.atlas.width;
-			txtMap->uv.y = (float) cp.y0 / window.atlas.height;
-			txtMap->uvSize.x = float(cp.x1 - cp.x0) / window.atlas.width;
-			txtMap->uvSize.y = float(cp.y1 - cp.y0) / window.atlas.height;
-			txtMap->color = txts == &capitals ? vec3f(0.f, 0.f, 0.f) : vec3f(1.f, 1.f, 1.f);
-			++ txtMap;
-			offset.x += cp.xadvance;
+	for(auto txts : {&capitals, &mainRoads}) {
+		const Font::CharPositions &cps = txts == &capitals ? window.capitalFont : window.roadFont;
+		for(const auto &[name, id] : *txts) {
+			if(name.empty()) continue;
+			const vec2f txtCenter = mercator(nodes[id]);
+			vec2f offset(0.f, numeric_limits<float>::max());
+			float y1 = numeric_limits<float>::min();
+			for(int c : name) {
+				const auto &cp = cps[c - Font::firstChar];
+				offset.x += cp.xadvance;
+				offset.y = min(offset.y, cp.yoff);
+				y1 = max(y1, cp.yoff + cp.y1 - cp.y0);
+			}
+			const auto &cp0 = cps[name[0] - Font::firstChar];
+			const auto &cp1 = cps[name.back() - Font::firstChar];
+			const float x0 = cp0.xoff;
+			const float x1 = offset.x - cp1.xadvance + cp1.xoff + cp1.x1 - cp1.x0;
+			offset.x = - (x0 + x1) / 2.f;
+			if(txts == &capitals) offset.y -= 6.f;
+			if(txts == &mainRoads) {
+				constexpr float margin = 4.f;
+				frmMap->txtCenter = txtCenter;
+				frmMap->offset = offset + vec2f(x0-margin, -y1-margin);
+				frmMap->size.x = x1 - x0 + 2.f*margin;
+				frmMap->size.y = y1 - offset.y + 2.f*margin;
+				++frmMap;
+			}
+			for(int c : name) {
+				const auto &cp = cps[c - Font::firstChar];
+				txtMap->txtCenter = txtCenter;
+				txtMap->offset = offset + vec2f(cp.xoff, -cp.yoff);
+				txtMap->size.x = cp.x1 - cp.x0;
+				txtMap->size.y = cp.y0 - cp.y1;
+				txtMap->uv.x = (float) cp.x0 / window.atlas.width;
+				txtMap->uv.y = (float) cp.y0 / window.atlas.height;
+				txtMap->uvSize.x = float(cp.x1 - cp.x0) / window.atlas.width;
+				txtMap->uvSize.y = float(cp.y1 - cp.y0) / window.atlas.height;
+				txtMap->color = txts == &capitals ? vec3f(0.f, 0.f, 0.f) : vec3f(1.f, 1.f, 1.f);
+				++ txtMap;
+				offset.x += cp.xadvance;
+			}
 		}
 	}
 	glUnmapNamedBuffer(textVBO);

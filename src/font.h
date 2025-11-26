@@ -4,8 +4,10 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace Font {
 
@@ -17,13 +19,19 @@ struct CharPosition {
 	uint16_t x0, y0, x1, y1;
 	float xoff, yoff, xadvance;
 };
+using CharPositions = std::array<CharPosition, charCount>;
+
+struct Entry {
+	CharPositions &positions;
+	const char* fileName;
+	float fontSize;
+};
 
 struct Atlas {
 	int width, height;
 	std::unique_ptr<uint8_t[]> img;
-	CharPosition charPositions[charCount];
 };
 
-Atlas getTTFAtlas(const char* fileName, float fontSize);
+Atlas getTTFAtlas(const std::vector<Entry> &entries);
 
 }
