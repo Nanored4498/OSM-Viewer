@@ -24,6 +24,5 @@ add_custom_command(
 	DEPENDS ProgramsGen ${list_txt} ${SHADER_SOURCES} ${PROGRAMS_CPP_DIR}
 	COMMENT "Generating programs cpp files"
 )
-list(APPEND PROGRAMS_GENERATED ${output_cpp} ${output_h})
 
-add_custom_target(programs_generated ALL DEPENDS ${PROGRAMS_GENERATED})
+add_custom_target(programs_generated ALL DEPENDS ${output_cpp} ${output_h})

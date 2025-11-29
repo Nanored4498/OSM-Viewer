@@ -25,9 +25,7 @@ protected:
 	std::vector<uint32_t> starts;
 
 public:
-	StringSwitch(const char* const words[], size_t nwords);
-	template<size_t N>
-	inline StringSwitch(const std::array<const char*, N> &words): StringSwitch(words.data(), N) {}
+	StringSwitch(const std::vector<std::pair<const char*, uint32_t>> &words);
 
 	inline static constexpr uint32_t NOT_FOUND = -1;
 	uint32_t feed(const std::string_view &word) const;

@@ -10,18 +10,17 @@
 
 using namespace std;
 
-StringSwitch::StringSwitch(const char* const words[], size_t nwords) {
-	if(!nwords) return;
+StringSwitch::StringSwitch(const std::vector<std::pair<const char*, uint32_t>> &words) {
+	if(words.empty()) return;
 	using PUU = pair<uint32_t, uint32_t>;
-	unique_ptr<PUU[]> order(new PUU[nwords]);
-	size_t nwords2 = 0;
-	for(uint32_t i = 0; i < nwords; ++i)
-		if(words[i])
-			order[nwords2++] = {i, strlen(words[i])};
-	nwords = nwords2;
+	unique_ptr<PUU[]> order(new PUU[words.size()]);
+	size_t nwords = 0;
+	for(uint32_t i = 0; i < words.size(); ++i)
+		if(words[i].first)
+			order[nwords++] = {i, strlen(words[i].first)};
 	if(!nwords) return;
 	ranges::sort(order.get(), order.get()+nwords, [&](const PUU &a, const PUU &b) {
-		return a.second < b.second || (a.second == b.second && strcmp(words[a.first], words[b.first]));
+		return a.second < b.second || (a.second == b.second && strcmp(words[a.first].first, words[b.first].first));
 	});
 	starts.resize(order[nwords-1].second+1, NOT_FOUND);
 	for(uint32_t i = 0; i < nwords;) {
@@ -41,18 +40,18 @@ StringSwitch::StringSwitch(const char* const words[], size_t nwords) {
 		uint32_t l = states[st].nxt[2];
 		if(l-k == 1) {
 			states[st].end = true;
-			states[st].word.first = words[order[l].first] + i;
-			states[st].word.second = order[l].first;
+			states[st].word = words[order[l].first];
+			states[st].word.first += i;
 		} else {
 			states[st].end = true;
 			states[st].nxt.fill(NOT_FOUND);
 			while(l < k) {
-				const char c = words[order[l].first][i];
+				const char c = words[order[l].first].first[i];
 				states[st].nxt[c] = states.size();
 				auto &info = states.emplace_back().nxt;
 				info[0] = i+1;
 				info[1] = l;
-				while(++l < k && words[order[l].first][i] == c);
+				while(++l < k && words[order[l].first].first[i] == c);
 				info[2] = l;
 			}
 		}

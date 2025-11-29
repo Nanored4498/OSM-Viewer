@@ -20,6 +20,8 @@
 
 #include "data/data.h"
 
+#include "enums/enums.h"
+
 #include "proto/generated/osm.pb.h"
 
 using namespace std;
@@ -39,13 +41,6 @@ unordered_set<string> supported_features = {
 	"OsmSchema-V0.6",
 	"DenseNodes",
 };
-
-template<typename E, typename T=const char*>
-constexpr auto make_array(initializer_list<pair<E, T>> init) {
-    array<T, (size_t) E::NUM> arr{};
-    for(const auto &[i, v] : init) arr[(size_t) i] = v;
-    return arr;
-}
 
 static void readHeader(const vector<uint8_t> &blobData, OSMData &data) {
 	const Proto::HeaderBlock hb(blobData);
@@ -89,33 +84,6 @@ static inline string_view getString(const vector<vector<uint8_t>> &ST, uint32_t 
 
 HashMap<vec2l> nodes;
 
-enum class NodeKey {
-	PLACE,
-	NAME,
-	CAPITAL,
-	NUM
-};
-const StringSwitch nodeKeySwitch([]{ using enum NodeKey; return make_array<NodeKey>({
-	{PLACE, "place"},
-	{NAME, "name"},
-	{CAPITAL, "capital"},
-}); }());
-
-enum class Place {
-	CITY,
-	NUM
-};
-const StringSwitch placeSwitch([]{ using enum Place; return make_array<Place>({
-	{CITY, "city"},
-}); }());
-
-struct NodeTags {
-	static inline constexpr uint32_t UNDEF = StringSwitch::NOT_FOUND;
-	int capital = -1;
-	Place place = (Place) UNDEF;
-	string_view name;
-};
-
 static void readDense(const Proto::PrimitiveBlock &pb, const Proto::DenseNodes &dense, const vector<vector<uint8_t>> &ST, OSMData &data) {
 	const int N = dense.id.size();
 	if(N != (int) dense.lat.size() || N != (int) dense.lon.size())
@@ -135,22 +103,7 @@ static void readDense(const Proto::PrimitiveBlock &pb, const Proto::DenseNodes &
 		while(*kv_it) {
 			const string_view key = getString(ST, *(kv_it++));
 			const string_view val = getString(ST, *(kv_it++));
-			switch((NodeKey) nodeKeySwitch.feed(key)) {
-			using enum NodeKey;
-			case PLACE:
-				tags.place = (Place) placeSwitch.feed(val);
-				break;
-			case NAME:
-				tags.name = val;
-				break;
-			case CAPITAL:
-				if(val == "yes") tags.capital = 2;
-				else if(from_chars(val.begin(), val.end(), tags.capital).ec != errc())
-					THROW_ERROR("capital is not a number: " + string(val));
-				break;
-			default:
-				break;
-			}
+			tags.readTag(key, val);
 		}
 		++ kv_it;
 
@@ -168,67 +121,6 @@ static void readDense(const Proto::PrimitiveBlock &pb, const Proto::DenseNodes &
 //// WAY ////
 /////////////
 
-enum class WayKey {
-	HIGHWAY,
-	WATERWAY,
-	BOUNDARY,
-	ADMIN_LVL,
-	LAND_USE,
-	NATURAL,
-	NUM
-};
-const StringSwitch wayKeySwitch([]{ using enum WayKey; return make_array<WayKey>({
-	{HIGHWAY, "highway"},
-	{WATERWAY, "waterway"},
-	{BOUNDARY, "boundary"},
-	{ADMIN_LVL, "admin_level"},
-	{LAND_USE, "land_use"},
-}); }());
-
-const StringSwitch roadTypeSwitch([]{ using enum RoadType; return make_array<RoadType>({
-	{MOTORWAY, "motorway"},
-	{TRUNK, "trunk"},
-	{PRIMARY, "primary"},
-}); }());
-
-const StringSwitch waterWaySwitch([] { using enum WaterWayType; return make_array<WaterWayType>({
-	{RIVER, "river"},
-}); }());
-
-enum class Boundary {
-	ADMIN,
-	NUM
-};
-const StringSwitch boundarySwitch([]{ using enum Boundary; return make_array<Boundary>({
-	{ADMIN, "administrative"}
-}); }());
-
-enum class LandUse {
-	FOREST,
-	NUM
-};
-const StringSwitch landUseSwitch([]{ using enum LandUse; return make_array<LandUse>({
-	{FOREST, "forest"}
-}); }());
-
-enum class Natural {
-	WOOD,
-	NUM
-};
-const StringSwitch naturalSwitch([]{ using enum Natural; return make_array<Natural>({
-	{WOOD, "wood"}
-}); }());
-
-struct WayTags {
-	static inline constexpr uint32_t UNDEF = StringSwitch::NOT_FOUND;
-	int admin_lvl = -1;
-	RoadType highway = (RoadType) UNDEF;
-	WaterWayType waterway = (WaterWayType) UNDEF;
-	Boundary boundary = (Boundary) UNDEF;
-	LandUse land_use = (LandUse) UNDEF;
-	Natural natural = (Natural) UNDEF;
-};
-
 static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, TmpData &data) {
 	if(!way.lat.empty() || !way.lon.empty()) THROW_ERROR("lat and lon fields in Way are not supported");
 
@@ -240,30 +132,7 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 	for(int i = 0; i < T; ++i) {
 		const string_view key = getString(ST, way.keys[i]);
 		const string_view val = getString(ST, way.vals[i]);
-		switch((WayKey) wayKeySwitch.feed(key)) {
-		using enum WayKey;
-		case HIGHWAY:
-			tags.highway = (RoadType) roadTypeSwitch.feed(val);
-			break;
-		case WATERWAY:
-			tags.waterway = (WaterWayType) waterWaySwitch.feed(val);
-			break;
-		case BOUNDARY:
-			tags.boundary = (Boundary) boundarySwitch.feed(val);
-			break;
-		case ADMIN_LVL:
-			if(from_chars(val.begin(), val.end(), tags.admin_lvl).ec != errc())
-				THROW_ERROR("admin_level is not a number: " + string(val));
-			break;
-		case LAND_USE:
-			tags.land_use = (LandUse) landUseSwitch.feed(val);
-			break;
-		case NATURAL:
-			tags.land_use = (LandUse) landUseSwitch.feed(val);
-			break;
-		default:
-			break;
-		}
+		tags.readTag(key, val);
 	}
 
 	// Process
@@ -277,11 +146,11 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 	};
 	if(tags.highway != tags0.highway) addRoad(data.roads[(uint32_t) tags.highway]);
 	if(tags.waterway != tags0.waterway) addRoad(data.waterWays[(uint32_t) tags.waterway]);
-	if(tags.boundary == Boundary::ADMIN && tags.admin_lvl >= 0 && tags.admin_lvl <= 4) {
+	if(tags.boundary == Boundary::ADMINISTRATIVE && tags.admin_level >= 0 && tags.admin_level <= 4) {
 		// TODO: different boundaries depending on admin level
 		addRoad(data.boundaries);
 	}
-	if(tags.land_use == LandUse::FOREST || tags.natural == Natural::WOOD) {
+	if(tags.land_use == Landuse::FOREST || tags.natural == Natural::WOOD) {
 		int64_t last = 0;
 		for(const int64_t ref : way.refs) {
 			last += ref;
@@ -297,75 +166,6 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 //// RELATION ////
 //////////////////
 
-enum class RelationType {
-	WATERWAY,
-	ROUTE,
-	MULTIPOLYGON,
-	NUM
-};
-const StringSwitch relationTypeSwitch([]{ using enum RelationType; return make_array<RelationType>({
-	{WATERWAY, "waterway"},
-	{ROUTE, "route"},
-	{MULTIPOLYGON, "multipolygon"},
-}); }());
-
-enum class RelationKey {
-	TYPE,
-	WATERWAY,
-	REF_SANDRE,
-	NETWORK,
-	REF,
-	LANDUSE,
-	NUM
-};
-const StringSwitch relationKeySwitch([]{ using enum RelationKey; return make_array<RelationKey>({
-	{TYPE, "type"},
-	{WATERWAY, "waterway"},
-	{REF_SANDRE, "ref:sandre"},
-	{NETWORK, "network"},
-	{REF, "ref"},
-	{LANDUSE, "landuse"},
-}); }());
-
-struct RelationTags {
-	static inline constexpr uint32_t UNDEF = StringSwitch::NOT_FOUND;
-	RelationType type = (RelationType) UNDEF;
-	union{
-		// waterway
-		struct {
-			WaterWayType waterway;
-			string_view sandre;
-		} waterway;
-		// route
-		struct {
-			string_view network, ref;
-		} route;
-		// multipolygon
-		struct {
-			LandUse landuse;
-		} multipolygon;
-	};
-	RelationTags() {};
-	void init() {
-		switch(type) {
-		using enum RelationType;
-		case WATERWAY:
-			waterway.waterway = (WaterWayType) UNDEF;
-			new(&waterway.sandre) string_view();
-			break;
-		case ROUTE:
-			new(&route.network) string_view();
-			new(&route.ref) string_view();
-			break;
-		case MULTIPOLYGON:
-			multipolygon.landuse = (LandUse) UNDEF;
-			break;
-		default:
-			break;
-		}
-	}
-};
-
 static void readRelation(const Proto::Relation &relation, const vector<vector<uint8_t>> &ST) {
 	const int T = relation.keys.size();
 	if(T != (int) relation.vals.size()) THROW_ERROR("Sizes mismatch in relation's tags...");
@@ -379,43 +179,24 @@ static void readRelation(const Proto::Relation &relation, const vector<vector<ui
 		const string_view key = getString(ST, relation.keys[i]);
 		if(key != "type") continue;
 		const string_view val = getString(ST, relation.vals[i]);
-		tags.type = (RelationType) relationTypeSwitch.feed(val);
+		tags.readType(val);
 		break;
 	}
-	if(tags.type == (RelationType) RelationTags::UNDEF) return;
+	if((uint32_t) tags.type == RelationTags::UNDEF) return;
 	tags.init();
 
 	// Read other tags
 	for(int i = 0; i < T; ++i) {
 		const string_view key = getString(ST, relation.keys[i]);
 		const string_view val = getString(ST, relation.vals[i]);
-		switch((RelationKey) relationKeySwitch.feed(key)) {
-		using enum RelationKey;
-		case WATERWAY:
-			tags.waterway.waterway = (WaterWayType) waterWaySwitch.feed(val);
-			break;
-		case REF_SANDRE:
-			tags.waterway.sandre = val;
-			break;
-		case NETWORK:
-			tags.route.network = val;
-			break;
-		case REF:
-			tags.route.ref = val;
-			break;
-		case LANDUSE:
-			tags.multipolygon.landuse = (LandUse) landUseSwitch.feed(val);
-			break;
-		default:
-			break;
-		}
+		tags.readTag(key, val);
 	}
 
 	// Process
 	switch(tags.type) {
 	using enum RelationType;
 	case WATERWAY:
-		if(tags.waterway.waterway == WaterWayType::RIVER && tags.waterway.sandre.size() > 1 && tags.waterway.sandre[1] == '-') {
+		if(tags.waterway.waterway == Waterway::RIVER && tags.waterway.ref_sandre.size() > 1 && tags.waterway.ref_sandre[1] == '-') {
 			int64_t memid = 0;
 			for(int i = 0; i < M; ++i) {
 				memid += relation.memids[i];
@@ -427,7 +208,7 @@ static void readRelation(const Proto::Relation &relation, const vector<vector<ui
 		}
 		break;
 	case RelationType::ROUTE:
-		if(tags.route.network == "FR:A-road" || tags.route.network == "FR:N-road") {
+		if(tags.route.network == Network::FR_A_ROAD || tags.route.network == Network::FR_N_ROAD) {
 			int64_t id = 0;
 			for(const int64_t mem : relation.memids) {
 				id += mem;
@@ -439,7 +220,7 @@ static void readRelation(const Proto::Relation &relation, const vector<vector<ui
 		}
 		break;
 	case RelationType::MULTIPOLYGON:
-		if(tags.multipolygon.landuse == LandUse::FOREST) {
+		if(tags.multipolygon.landuse == Landuse::FOREST) {
 			int64_t memid = 0;
 			for(int i = 0; i < M; ++i) {
 				memid += relation.memids[i];
