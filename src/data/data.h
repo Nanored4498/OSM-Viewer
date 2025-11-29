@@ -38,7 +38,10 @@ struct OSMData {
 	// named points
 	std::vector<char> names;
 	std::vector<std::pair<vec2l, uint32_t>> capitals;
+	// TODO: should be a list of roads and not a point
+	std::vector<std::pair<vec2l, uint32_t>> roadNames;
 
 	// IO
+	void read(const char *fileName); 
 	void write(const char *fileName) const; 
 };

@@ -42,7 +42,6 @@ add_dependencies(${PROJECT_NAME}
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
-	MAP_DIR=\"${CMAKE_SOURCE_DIR}/map\"
 	SHADER_DIR=\"${CMAKE_SOURCE_DIR}/shaders\"
 	FONT_DIR=\"${CMAKE_SOURCE_DIR}/fonts\"
 )
@@ -54,6 +53,5 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
 	${OPENGL_LIBRARIES}
-	${ZLIB_LIBRARIES} # TODO: Remove
 	glfw
 )

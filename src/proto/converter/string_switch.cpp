@@ -36,23 +36,23 @@ StringSwitch::StringSwitch(const std::vector<std::pair<const char*, uint32_t>> &
 	}
 	for(uint32_t st = 0; st < states.size(); ++st) {
 		const uint32_t i = states[st].nxt[0];
-		const uint32_t k = states[st].nxt[1];
-		uint32_t l = states[st].nxt[2];
+		uint32_t k = states[st].nxt[1];
+		const uint32_t l = states[st].nxt[2];
 		if(l-k == 1) {
 			states[st].end = true;
-			states[st].word = words[order[l].first];
+			states[st].word = words[order[k].first];
 			states[st].word.first += i;
 		} else {
-			states[st].end = true;
+			states[st].end = false;
 			states[st].nxt.fill(NOT_FOUND);
-			while(l < k) {
-				const char c = words[order[l].first].first[i];
-				states[st].nxt[c] = states.size();
+			while(k < l) {
+				const char c = words[order[k].first].first[i];
+				states[st].nxt[c-minChar] = states.size();
 				auto &info = states.emplace_back().nxt;
 				info[0] = i+1;
-				info[1] = l;
-				while(++l < k && words[order[l].first].first[i] == c);
-				info[2] = l;
+				info[1] = k;
+				while(++k < l && words[order[k].first].first[i] == c);
+				info[2] = k;
 			}
 		}
 	}
@@ -65,7 +65,7 @@ uint32_t StringSwitch::feed(const std::string_view &word) const {
 	while(true) {
 		if(st == NOT_FOUND) return NOT_FOUND;
 		const State &state = states[st];
-		if(state.end) return memcmp(word.begin()+i, state.word.first, size-i) ? state.word.second : NOT_FOUND;
+		if(state.end) return memcmp(word.begin()+i, state.word.first, size-i) ? NOT_FOUND : state.word.second;
 		const char c = word[i++];
 		if(c < minChar || c > maxChar) return NOT_FOUND;
 		st = state.nxt[c-minChar];

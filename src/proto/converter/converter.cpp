@@ -121,8 +121,16 @@ static void readDense(const Proto::PrimitiveBlock &pb, const Proto::DenseNodes &
 //// WAY ////
 /////////////
 
+HashMap<vector<int64_t>> ways;
+
 static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, TmpData &data) {
 	if(!way.lat.empty() || !way.lon.empty()) THROW_ERROR("lat and lon fields in Way are not supported");
+	vector<int64_t> &w = ways[way.id] = way.refs;
+	int64_t cur = 0;
+	for(int64_t &ref : w) {
+		cur += ref;
+		ref = cur;
+	}
 
 	// Read Tags
 	const int T = way.keys.size();
@@ -137,11 +145,8 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 
 	// Process
 	const auto addRoad = [&](TmpRoad &roads) {
-		int64_t last = 0;
-		for(const int64_t ref : way.refs) {
-			last += ref;
-			roads.pts.push_back(nodes[last]);
-		}
+		for(const int64_t ref : w)
+			roads.pts.push_back(nodes[ref]);
 		roads.end();
 	};
 	if(tags.highway != tags0.highway) addRoad(data.roads[(uint32_t) tags.highway]);
@@ -151,14 +156,10 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 		addRoad(data.boundaries);
 	}
 	if(tags.land_use == Landuse::FOREST || tags.natural == Natural::WOOD) {
-		int64_t last = 0;
-		for(const int64_t ref : way.refs) {
-			last += ref;
-			data.forests.pts.push_back(nodes[last]);
-		}
-		if(data.forests.pts.back() != data.forests.pts[data.forests.off.back()]) THROW_ERROR("Not closed");
-		data.forests.pts.pop_back();
-		data.forests.end();
+		if(w.back() != w[0]) THROW_ERROR("Not closed");
+		w.pop_back();
+		if(w.size() < 3) THROW_ERROR("area with less than 3 nodes");
+		addRoad(data.forests);
 	}
 }
 
@@ -166,7 +167,7 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 //// RELATION ////
 //////////////////
 
-static void readRelation(const Proto::Relation &relation, const vector<vector<uint8_t>> &ST) {
+static void readRelation(const Proto::Relation &relation, const vector<vector<uint8_t>> &ST, OSMData &data) {
 	const int T = relation.keys.size();
 	if(T != (int) relation.vals.size()) THROW_ERROR("Sizes mismatch in relation's tags...");
 	const int M = relation.memids.size();
@@ -196,29 +197,33 @@ static void readRelation(const Proto::Relation &relation, const vector<vector<ui
 	switch(tags.type) {
 	using enum RelationType;
 	case WATERWAY:
-		if(tags.waterway.waterway == Waterway::RIVER && tags.waterway.ref_sandre.size() > 1 && tags.waterway.ref_sandre[1] == '-') {
-			int64_t memid = 0;
-			for(int i = 0; i < M; ++i) {
-				memid += relation.memids[i];
-				if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
-				// const string_view role = getString(ST, relation.roles_sid[i]);
-				// if(role == "main_stream" && rivers.contains(memid))
-				// 	mainRivers.push_back(memid);
-			}
-		}
+		// if(tags.waterway.waterway == Waterway::RIVER && tags.waterway.ref_sandre.size() > 1 && tags.waterway.ref_sandre[1] == '-') {
+		// 	int64_t memid = 0;
+		// 	for(int i = 0; i < M; ++i) {
+		// 		memid += relation.memids[i];
+		// 		if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
+		// 		const string_view role = getString(ST, relation.roles_sid[i]);
+		// 		if(role == "main_stream" && rivers.contains(memid))
+		// 			mainRivers.push_back(memid);
+		// 	}
+		// }
 		break;
-	case RelationType::ROUTE:
-		if(tags.route.network == Network::FR_A_ROAD || tags.route.network == Network::FR_N_ROAD) {
+	case RelationType::ROUTE: {
+		const auto &route = tags.route;
+		if(route.network == Network::FR_A_ROAD || route.network == Network::FR_N_ROAD) {
 			int64_t id = 0;
 			for(const int64_t mem : relation.memids) {
 				id += mem;
-				// auto it = motorways.find(id);
-				// if(it == motorways.end()) continue;
-				// mainRoads.emplace_back(name, it->second[0]);
+				auto it = ways.find(id);
+				if(it == ways.end()) continue;
+				data.roadNames.emplace_back(nodes[it->second[0]], data.names.size());
+				data.names.insert(data.names.end(), route.ref.begin(), route.ref.end());
+				data.names.push_back('\0');
 				break;
 			}
 		}
 		break;
+	}
 	case RelationType::MULTIPOLYGON:
 		if(tags.multipolygon.landuse == Landuse::FOREST) {
 			int64_t memid = 0;
@@ -289,7 +294,7 @@ int main(int argc, const char* argv[]) {
 				if(!pg.changesets.empty()) THROW_ERROR("Not implemented");
 				if(pg._has_dense) readDense(pb, pg.dense, ST, data);
 				for(const Proto::Way &way : pg.ways) readWay(way, ST, tmpData);
-				for(const Proto::Relation &relation : pg.relations) readRelation(relation, ST);
+				for(const Proto::Relation &relation : pg.relations) readRelation(relation, ST, data);
 			}
 		} else THROW_ERROR("Not recognized blob type: " + header.type);
 	}

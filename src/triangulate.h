@@ -9,4 +9,4 @@
 
 #include <vec.h>
 
-std::vector<uint32_t> triangulate(const std::vector<vec2l> &pts);
+std::vector<uint32_t> triangulate(const vec2l *pts, int N);

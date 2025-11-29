@@ -16,7 +16,7 @@
 
 using namespace std;
 
-static bool turnLeft(const vector<vec2l> &pts, int i, int j, int k) {
+static bool turnLeft(const vec2l *pts, int i, int j, int k) {
 	__int128_t ax = pts[j].x - pts[i].x, ay = pts[j].y - pts[i].y;
 	__int128_t bx = pts[k].x - pts[j].x, by = pts[k].y - pts[j].y;
 	return ax * by > ay * bx;
@@ -32,19 +32,19 @@ struct Edge {
 	inline int a() const { return prev->b; };
 };
 
-vector<uint32_t> triangulate(const vector<vec2l> &pts) {
-	if(pts.size() == 3)
+vector<uint32_t> triangulate(const vec2l *pts, int Npts) {
+	if(Npts == 3)
 		return {0u, 1u, 2u};
 	vector<uint32_t> indices;
 
 	// Using [V-E+F = 1-g] and [H = 3F = 2E-V] we get [H = 3V + 6(g-1)]
 	// Here g = 0
-	const int H = 3*pts.size() - 6;
-	int newEdge = pts.size();
+	const int H = 3*Npts - 6;
+	int newEdge = Npts;
 	unique_ptr<Edge[]> edges(new Edge[H]);
-	vector<Edge*> in(pts.size()), out(pts.size());
-	for(int i = 0; i < (int) pts.size(); ++i) {
-		edges[i].b = i+1 == (int) pts.size() ? 0 : i+1;
+	vector<Edge*> in(Npts), out(Npts);
+	for(int i = 0; i < Npts; ++i) {
+		edges[i].b = i+1 == Npts ? 0 : i+1;
 		out[i] = &edges[i];
 		if(i > 0) {
 			in[i] = out[i-1];
@@ -57,14 +57,14 @@ vector<uint32_t> triangulate(const vector<vec2l> &pts) {
 	const auto compY = [&](const int i, const int j)->bool {
 		return pts[i].y < pts[j].y || (pts[i].y == pts[j].y && pts[i].x < pts[j].x);
 	};
-	vector<int> order(pts.size());
+	vector<int> order(Npts);
 	ranges::iota(order, 0);
 	ranges::sort(order, compY);
 	if(!turnLeft(pts, in[order[0]]->a(), order[0], out[order[0]]->b)) { // the contour is clockwise
 		// we make it counter-clockwise
-		for(int i = 0; i < (int) pts.size(); ++i)
+		for(int i = 0; i < Npts; ++i)
 			out[i] = in[i]->prev;
-		for(int i = 0; i < (int) pts.size(); ++i)
+		for(int i = 0; i < Npts; ++i)
 			swap(edges[i].prev, edges[i].next);
 	}
 
