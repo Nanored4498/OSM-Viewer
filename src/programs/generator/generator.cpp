@@ -313,6 +313,7 @@ struct Programs {
 				break;
 			case GL_FLOAT_VEC3:
 				Hfile << "GLfloat x, GLfloat y, GLfloat z) { glUniform3f(" << u.index << ", x, y, z); }\n";
+				Hfile << "\t\tinline void set_" << u.name << "(const vec3f &v) { glUniform3f(" << u.index << ", v.x, v.y, v.z); }\n";
 				break;
 			case GL_SAMPLER_2D:
 				Hfile << "GLint i) { glUniform1i(" << u.index << ", i); }\n";

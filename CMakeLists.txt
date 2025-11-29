@@ -15,26 +15,28 @@ if(CMAKE_CXX_COMPILER_ID MATCHES GNU OR CMAKE_CXX_COMPILER_ID MATCHES Clang)
 	)
 endif()
 
+# Find packages
+find_package(OpenGL REQUIRED)
+find_package(glfw3 REQUIRED)
+find_package(ZLIB REQUIRED)
+
+# Subdirectories
 add_subdirectory(src/proto)
 add_subdirectory(src/programs)
 
 # Sources
 file(GLOB SOURCES
 	src/*.cpp
+	src/data/*.cpp
 	src/glad/*.c
 	src/programs/generated/*.cpp
 	src/proto/*.cpp
 	src/proto/generated/*.cpp
 )
 
-# Find packages
-find_package(OpenGL REQUIRED)
-find_package(glfw3 REQUIRED)
-find_package(ZLIB REQUIRED)
-
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-add_dependencies(OSM
+add_dependencies(${PROJECT_NAME}
 	proto_generated
 	programs_generated
 )
@@ -52,6 +54,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
 	${OPENGL_LIBRARIES}
-	${ZLIB_LIBRARIES}
+	${ZLIB_LIBRARIES} # TODO: Remove
 	glfw
 )

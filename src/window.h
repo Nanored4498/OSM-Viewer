@@ -39,8 +39,7 @@ struct Window {
 	float anchorX, anchorY;
 
 	struct Road {
-		float r, g, b;
-		float r2, g2, b2;
+		vec3f col, col2;
 		const void* offset;
 		GLsizei count;
 		bool border;

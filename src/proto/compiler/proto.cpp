@@ -311,20 +311,18 @@ constexpr auto typeE2R = make_array<const char*, NTE>({
 	{Field::Type::UINT32, "readInt32"},
 });
 const char* typeString(Field::Type type) {
-	const char* x = typeE2S[type];
-	if(!x) {
+	if(type >= typeE2S.size() || !typeE2S[type]) {
 		cerr << "Not implemented (" << __FILE__ << ':' << __LINE__ << "): " << type << endl;
 		exit(1);
 	}
-	return x;
+	return typeE2S[type];
 }
 const char* typeRead(Field::Type type) {
-	const char* x = typeE2R[type];
-	if(!x) {
+	if(type >= typeE2S.size() || !typeE2R[type]) {
 		cerr << "Not implemented (" << __FILE__ << ':' << __LINE__ << "): " << type << endl;
 		exit(1);
 	}
-	return x;
+	return typeE2R[type];
 }
 
 int main(int argc, char* argv[]) {

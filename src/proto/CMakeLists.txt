@@ -1,4 +1,5 @@
 add_subdirectory(compiler)
+add_subdirectory(converter)
 
 file(GLOB PROTO_SOURCES
 	*.proto

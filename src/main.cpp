@@ -42,13 +42,16 @@ unordered_set<string> supported_features = {
 	"DenseNodes",
 };
 
-struct Color {
-	float r, g, b;
+enum RelationType {
+	UNKNOWN,
+	WATERWAY,
+	ROUTE,
+	MULTIPOLYGON
 };
 
 struct RoadType {
 	string name;
-	Color col, col2;
+	vec3f col, col2;
 	bool border;
 };
 
@@ -66,7 +69,7 @@ vector<int64_t> mainRivers;
 
 vector<vector<int64_t>> forests;
 
-constexpr Color countryBorderColor {0.812f, 0.608f, 0.796f};
+constexpr vec3f countryBorderColor {0.812f, 0.608f, 0.796f};
 
 consteval HashMap<vector<int64_t>>& getRoadsByName(const string &name) {
 	return roads[ranges::find(roadTypes, name, [&](const RoadType &rt) {
@@ -77,8 +80,10 @@ constexpr auto &motorways = getRoadsByName("motorway");
 constexpr auto &rivers = getRoadsByName("river");
 
 void addMainRoad(const string_view &name, const vector<int64_t> &mems) {
+	int64_t id = 0;
 	for(const int64_t mem : mems) {
-		auto it = motorways.find(mem);
+		id += mem;
+		auto it = motorways.find(id);
 		if(it == motorways.end()) continue;
 		mainRoads.emplace_back(name, it->second[0]);
 		break;
@@ -179,16 +184,19 @@ int main() {
 					const int M = relation.memids.size();
 					if(M != (int) relation.roles_sid.size()) THROW_ERROR("Sizes mismatch in relation's members...");
 					if(M != (int) relation.types.size()) THROW_ERROR("Sizes mismatch in relation's members...");
-					bool isWaterway = false, isRiver = false;
-					bool isRoute = false;
+					RelationType type = RelationType::UNKNOWN;
+					bool isRiver = false;
+					bool isForest = false;
 					string_view sandre;
 					string_view network, ref;
 					for(int i = 0; i < T; ++i) {
 						const string_view key = getString(relation.keys[i]);
 						const string_view val = getString(relation.vals[i]);
 						if(key == "type") {
-							if(val == "waterway") isWaterway = true;
-							else if(val == "route") isRoute = true;
+							if(val == "waterway") type = RelationType::WATERWAY;
+							else if(val == "route") type = RelationType::ROUTE;
+							else if(val == "multipolygon") type = RelationType::MULTIPOLYGON;
+							else type = RelationType::UNKNOWN;
 						} else if(key == "waterway") {
 							if(val == "river") isRiver = true;
 						} else if(key == "ref:sandre") {
@@ -197,20 +205,46 @@ int main() {
 							network = val;
 						} else if(key == "ref") {
 							ref = val;
+						} else if(key == "landuse") {
+							if(val == "forest")
+								isForest = true;
 						}
 					}
-					if(isWaterway && isRiver && sandre.size() > 1 && sandre[1] == '-') {
-						int64_t memid = 0;
-						for(int i = 0; i < M; ++i) {
-							memid += relation.memids[i];
-							if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
-							const string_view role = getString(relation.roles_sid[i]);
-							if(role == "main_stream" && rivers.contains(memid))
-								mainRivers.push_back(memid);
+					switch(type) {
+					case RelationType::WATERWAY:
+						if(isRiver && sandre.size() > 1 && sandre[1] == '-') {
+							int64_t memid = 0;
+							for(int i = 0; i < M; ++i) {
+								memid += relation.memids[i];
+								if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
+								const string_view role = getString(relation.roles_sid[i]);
+								if(role == "main_stream" && rivers.contains(memid))
+									mainRivers.push_back(memid);
+							}
 						}
+						break;
+					case RelationType::ROUTE:
+						if(network == "FR:A-road" || network == "FR:N-road")
+							addMainRoad(ref, relation.memids);
+						break;
+					case RelationType::MULTIPOLYGON:
+						if(isForest) {
+							int64_t memid = 0;
+							for(int i = 0; i < M; ++i) {
+								memid += relation.memids[i];
+								if(relation.types[i] != Proto::Relation::MemberType::WAY) continue;
+								const string_view role = getString(relation.roles_sid[i]);
+								if(role == "inner")
+									mainRivers.push_back(memid);
+								else if(role == "outter") {
+
+								}
+							}
+						}
+						break;
+					default:
+						break;
 					}
-					if(isRoute && (network == "FR:A-road" || network == "FR:N-road"))
-						addMainRoad(ref, relation.memids);
 				}
 				if(pg._has_dense) {
 					const Proto::DenseNodes &dense = pg.dense;
@@ -270,12 +304,8 @@ int main() {
 	GLsizei VBOcount = 0, CMDcount = 0;
 	for(int i = 0; i < (int) std::size(roads); ++i) {
 		Window::Road &wr = window.roads.emplace_back();
-		wr.r = roadTypes[i].col.r;
-		wr.g = roadTypes[i].col.g;
-		wr.b = roadTypes[i].col.b;
-		wr.r2 = roadTypes[i].col2.r;
-		wr.g2 = roadTypes[i].col2.g;
-		wr.b2 = roadTypes[i].col2.b;
+		wr.col = roadTypes[i].col;
+		wr.col2 = roadTypes[i].col2;
 		wr.border = roadTypes[i].border;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		if(&roads[i] == &rivers) {
@@ -288,9 +318,7 @@ int main() {
 	}
 	{ // Country border
 		Window::Road &wr = window.roads.emplace_back();
-		wr.r = countryBorderColor.r;
-		wr.g = countryBorderColor.g;
-		wr.b = countryBorderColor.b;
+		wr.col = countryBorderColor;
 		wr.border = false;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		CMDcount += (wr.count = countryBorders.size());

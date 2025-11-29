@@ -161,17 +161,16 @@ void Window::start() {
 
 		// Render roads
 		// TODO: rivers should be rendered before road borders
-		// TODO: Use one glMultiDrawArraysIndirect and remove color uniform for a SSBO of color per draw using gl_DrawID
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
 		glLineWidth(5.f);
 		for(const Road &r : roads | views::reverse) {
 			if(!r.border) continue;
-			progs.main.set_color(r.r2, r.g2, r.b2);
+			progs.main.set_color(r.col2);
 			glMultiDrawArraysIndirect(GL_LINE_STRIP, r.offset, r.count, 0);
 		}
 		glLineWidth(3.f);
 		for(const Road &r : roads | views::reverse) {
-			progs.main.set_color(r.r, r.g, r.b);
+			progs.main.set_color(r.col);
 			glMultiDrawArraysIndirect(GL_LINE_STRIP, r.offset, r.count, 0);
 		}
 

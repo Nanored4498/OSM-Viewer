@@ -1,0 +1,74 @@
+// Copyright (C) 2025, Coudert--Osmont Yoann
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// See <https://www.gnu.org/licenses/>
+
+#include "string_switch.h"
+
+#include <algorithm>
+#include <cstring>
+#include <memory>
+
+using namespace std;
+
+StringSwitch::StringSwitch(const char* const words[], size_t nwords) {
+	if(!nwords) return;
+	using PUU = pair<uint32_t, uint32_t>;
+	unique_ptr<PUU[]> order(new PUU[nwords]);
+	size_t nwords2 = 0;
+	for(uint32_t i = 0; i < nwords; ++i)
+		if(words[i])
+			order[nwords2++] = {i, strlen(words[i])};
+	nwords = nwords2;
+	if(!nwords) return;
+	ranges::sort(order.get(), order.get()+nwords, [&](const PUU &a, const PUU &b) {
+		return a.second < b.second || (a.second == b.second && strcmp(words[a.first], words[b.first]));
+	});
+	starts.resize(order[nwords-1].second+1, NOT_FOUND);
+	for(uint32_t i = 0; i < nwords;) {
+		const uint32_t size = order[i].second;
+		uint32_t j = i+1;
+		while(j < nwords && order[j].second == size) ++ j;
+		starts[size] = states.size();
+		auto &info = states.emplace_back().nxt;
+		info[0] = 0;
+		info[1] = i;
+		info[2] = j;
+		i = j;
+	}
+	for(uint32_t st = 0; st < states.size(); ++st) {
+		const uint32_t i = states[st].nxt[0];
+		const uint32_t k = states[st].nxt[1];
+		uint32_t l = states[st].nxt[2];
+		if(l-k == 1) {
+			states[st].end = true;
+			states[st].word.first = words[order[l].first] + i;
+			states[st].word.second = order[l].first;
+		} else {
+			states[st].end = true;
+			states[st].nxt.fill(NOT_FOUND);
+			while(l < k) {
+				const char c = words[order[l].first][i];
+				states[st].nxt[c] = states.size();
+				auto &info = states.emplace_back().nxt;
+				info[0] = i+1;
+				info[1] = l;
+				while(++l < k && words[order[l].first][i] == c);
+				info[2] = l;
+			}
+		}
+	}
+}
+
+uint32_t StringSwitch::feed(const std::string_view &word) const {
+	const size_t size = word.size();
+	if(size >= starts.size()) return NOT_FOUND;
+	uint32_t st = starts[size], i = 0;
+	while(true) {
+		if(st == NOT_FOUND) return NOT_FOUND;
+		const State &state = states[st];
+		if(state.end) return memcmp(word.begin()+i, state.word.first, size-i) ? state.word.second : NOT_FOUND;
+		const char c = word[i++];
+		if(c < minChar || c > maxChar) return NOT_FOUND;
+		st = state.nxt[c-minChar];
+	}
+}
