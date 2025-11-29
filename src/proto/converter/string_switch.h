@@ -11,7 +11,7 @@
 
 struct StringSwitch {
 protected:
-	inline static constexpr char minChar = 'A';
+	inline static constexpr char minChar = ':';
 	inline static constexpr char maxChar = 'z';
 	struct State {
 		union {

@@ -78,9 +78,10 @@ int main(int argc, const char* argv[]) {
 		VBOcount += data.roadOffsets[data.boundaries.second] - data.roadOffsets[data.boundaries.first];
 	}
 	// Forests
-	window.forestsCount = data.forests.second - data.forests.first;
+	window.forestsCount =
+		3 * (data.roadOffsets[data.forests.second] - data.roadOffsets[data.forests.first])
+		- 6 * (data.forests.second - data.forests.first);
 	VBOcount += data.roadOffsets[data.forests.second] - data.roadOffsets[data.forests.first];
-	cerr << VBOcount << ' ' << data.roads.size() << endl;
 	// Capitals points
 	window.capitalsFirst = VBOcount;
 	VBOcount += (window.capitalsCount = data.capitals.size());

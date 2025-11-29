@@ -35,7 +35,7 @@ Key wayKeys[] {
 	{"waterway", &waterway},
 	{"boundary", &boundary},
 	{"admin_level", &int_t},
-	{"land_use", &landuse},
+	{"landuse", &landuse},
 	{"natural", &natural},
 };
 

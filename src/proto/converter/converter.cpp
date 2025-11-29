@@ -155,7 +155,7 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 		// TODO: different boundaries depending on admin level
 		addRoad(data.boundaries);
 	}
-	if(tags.land_use == Landuse::FOREST || tags.natural == Natural::WOOD) {
+	if(tags.landuse == Landuse::FOREST || tags.natural == Natural::WOOD) {
 		if(w.back() != w[0]) THROW_ERROR("Not closed");
 		w.pop_back();
 		if(w.size() < 3) THROW_ERROR("area with less than 3 nodes");
@@ -319,20 +319,20 @@ int main(int argc, const char* argv[]) {
 	data.roadTypeOffsets[0] = 0;
 	for(int i = 0; i < (int) RoadType::NUM; ++i) {
 		addTmpRoads(tmpData.roads[i]);
-		data.roadTypeOffsets[i+1] = data.roadOffsets.size();
+		data.roadTypeOffsets[i+1] = data.roadOffsets.size()-1;
 	}
-	data.waterWayTypeOffsets[0] = data.roadOffsets.size();
+	data.waterWayTypeOffsets[0] = data.roadOffsets.size()-1;
 	for(int i = 0; i < (int) WaterWayType::NUM; ++i) {
 		addTmpRoads(tmpData.waterWays[i]);
-		data.waterWayTypeOffsets[i+1] = data.roadOffsets.size();
+		data.waterWayTypeOffsets[i+1] = data.roadOffsets.size()-1;
 	}
-	data.boundaries.first = data.roadOffsets.size();
+	data.boundaries.first = data.roadOffsets.size()-1;
 	addTmpRoads(tmpData.boundaries);
-	data.boundaries.second = data.roadOffsets.size();
-	data.forests.first = data.roadOffsets.size();
+	data.boundaries.second = data.roadOffsets.size()-1;
+	data.forests.first = data.roadOffsets.size()-1;
 	addTmpRoads(tmpData.forests);
-	data.forests.second = data.roadOffsets.size();
-	
+	data.forests.second = data.roadOffsets.size()-1;
+
 	// Write data
 	data.write(argv[2]);
 	
