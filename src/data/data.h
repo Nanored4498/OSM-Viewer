@@ -9,6 +9,8 @@
 
 #include "vec.h"
 
+// TODO: when granularity is 100 could use int32_t as coordinates
+
 enum class RoadType : uint32_t {
 	MOTORWAY,
 	TRUNK,
@@ -33,7 +35,9 @@ struct OSMData {
 	std::pair<uint32_t, uint32_t> boundaries;
 
 	// areas
-	std::pair<uint32_t, uint32_t> forests;
+	std::vector<uint32_t> refs;
+	std::vector<uint32_t> refOffsets;
+	std::pair<uint32_t, uint32_t> forests, forestsR;
 
 	// named points
 	std::vector<char> names;
@@ -41,7 +45,10 @@ struct OSMData {
 	// TODO: should be a list of roads and not a point
 	std::vector<std::pair<vec2l, uint32_t>> roadNames;
 
+	// Helper
+	bool isWayClosed(uint32_t id) const;
+
 	// IO
 	void read(const char *fileName); 
-	void write(const char *fileName) const; 
+	void write(const char *fileName) const;
 };

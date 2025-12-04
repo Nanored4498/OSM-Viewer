@@ -27,6 +27,8 @@ protected:
 	private:
 		template<typename U>
 		using put_const = std::conditional_t<isConst, const U, U>;
+
+		put_const<Node>* it;
 	
 	public:
 		using iterator_category = std::forward_iterator_tag;
@@ -34,8 +36,6 @@ protected:
 		using value_type        = decltype(Node::kv);
 		using pointer           = put_const<value_type>*;
 		using reference         = put_const<value_type>&;
-
-		put_const<Node>* it;
 
 		_iterator(put_const<Node>* it = nullptr): it(it) {}
 
@@ -54,6 +54,14 @@ protected:
 		return id % buckets.size();
 	}
 
+	Node* _find(const int64_t id) {
+		if(buckets.empty()) return v.data() + v.size();
+		int b = key(id);
+		for(int i = buckets[b]; i != -1; i = v[i].nxt)
+			if(v[i].kv.first == id) return &v[i];
+		return v.data() + v.size();
+	}
+
 public:
 	using iterator = _iterator<false>;
 	using const_iterator = _iterator<true>;
@@ -63,13 +71,8 @@ public:
 	const_iterator begin() const { return v.data(); }
 	const_iterator end() const { return v.data() + v.size(); }
 
-	const_iterator find(const int64_t id) const {
-		if(buckets.empty()) return end();
-		int b = key(id);
-		for(int i = buckets[b]; i != -1; i = v[i].nxt)
-			if(v[i].kv.first == id) return &v[i];
-		return end();
-	}
+	iterator find(const int64_t id) { return _find(id); }
+	const_iterator find(const int64_t id) const { return _find(id); }
 
 	T& operator[](const int64_t id) {
 		if(buckets.empty()) buckets.assign(primes[0], -1);

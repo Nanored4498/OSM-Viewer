@@ -9,4 +9,8 @@
 
 #include <vec.h>
 
-std::vector<uint32_t> triangulate(const vec2l *pts, int N);
+std::vector<uint32_t> triangulate(const vec2l *pts, const uint32_t *ends, uint32_t N);
+inline std::vector<uint32_t> triangulate(const vec2l *pts, uint32_t N) {
+	volatile const uint32_t end = N;
+	return triangulate(pts, const_cast<const uint32_t*>(&end), 1u);
+}

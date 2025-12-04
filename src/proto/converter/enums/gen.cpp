@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
 			else if(t == &int_t) Hfile << "int";
 			else Hfile << toClass(enumNames[t]);
 			Hfile << " " << toMember(name);
-			if(t == &int_t) Hfile << " = 1";
+			if(t == &int_t) Hfile << " = -1";
 			else if(t) Hfile << " = (" << toClass(enumNames[t]) << ") UNDEF";
 			Hfile << ";\n";
 		}

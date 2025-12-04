@@ -7,9 +7,11 @@
 #include <cstring>
 #include <iostream>
 #include <numbers>
+#include <numeric>
 #include <ranges>
 
 #include "triangulate.h"
+#include "utils.h"
 #include "vec.h"
 #include "window.h"
 
@@ -40,8 +42,64 @@ int main(int argc, const char* argv[]) {
 		return 1;
 	}
 
+	// Get data
 	OSMData data;
 	data.read(argv[1]);
+
+	// Triangulate multipolygons
+	vector<uint32_t> forestIndices;
+	for(const uint32_t i : views::iota(data.forestsR.first, data.forestsR.second)) {
+		const span<uint32_t> refs(data.refs.data() + data.refOffsets[i], data.refs.data() + data.refOffsets[i+1]);
+		size_t size = 0;
+		for(const uint32_t j : refs) size += data.roadOffsets[j+1]-data.roadOffsets[j];
+		unique_ptr<uint32_t[]> remap(new uint32_t[size + refs.size()]);
+		uint32_t *m = remap.get();
+		uint32_t *const ends = remap.get() + size;
+		uint32_t *e = ends;
+		bool out = true;
+		for(auto j = refs.begin(); j != refs.end(); ++j) {
+			// get a closed way [m0, m[
+			uint32_t *const m0 = m;
+			m += data.roadOffsets[*j+1] - data.roadOffsets[*j];
+			iota(m0, m, data.roadOffsets[*j]);
+			if(!data.isWayClosed(*j)) {
+				while(data.roads[*m0] != data.roads[*(m-1)]) {
+					if((++j) == refs.end()) THROW_ERROR("way not closed");
+					uint32_t *const m1 = m;
+					m += data.roadOffsets[*j+1] - data.roadOffsets[*j] - 1;
+					if(data.roads[*(m1-1)] == data.roads[data.roadOffsets[*j]]) {
+						iota(m1, m, data.roadOffsets[*j]+1);
+					} else if(data.roads[*(m1-1)] == data.roads[data.roadOffsets[*j+1]-1]) {
+						ranges::iota(span(m1, m) | views::reverse, data.roadOffsets[*j]);
+					} else THROW_ERROR("way not closed");
+				}
+				--m;
+			}
+
+			// correct orientation
+			__int128_t area = 0;
+			const int N = m-m0;
+			for(int i = 0; i < N; ++i) {
+				const vec2l &a = data.roads[m0[i]];
+				const vec2l &b = data.roads[m0[(i+1)%N]];
+				area += __int128_t(a.x - b.x) * (a.y + b.y);
+			}
+			if(out != (area > 0)) reverse(m0, m);
+			out = false;
+			*(e++) = m - remap.get();
+		}
+
+		unique_ptr<vec2l[]> pts(new vec2l[m - remap.get()]);
+		transform(remap.get(), m, pts.get(), [&](const uint32_t j) {
+			return data.roads[j];
+		});
+		cerr << i - data.forestsR.first << endl;
+		// TODO: there some bugs due to shared points between inner loops
+		const vector<uint32_t> indices = triangulate(pts.get(), ends, e-ends);
+		forestIndices.insert_range(forestIndices.end(), indices | views::transform([&](const uint32_t i) {
+			return remap[i];
+		}));
+	}
 
 	// Create window
 	Window window;
@@ -55,7 +113,7 @@ int main(int argc, const char* argv[]) {
 
 	// Compute size
 	// TODO: VBOcount and CMDcount useless
-	GLsizei VBOcount = 0, CMDcount = 0;
+	GLsizei CMDcount = 0;
 	const auto addRoads = [&](const auto &typeOff, const RoadStyle *styles) {
 		for(uint32_t i = 0; i+1 < std::size(typeOff); ++i) {
 			Window::Road &wr = window.roads.emplace_back();
@@ -64,7 +122,6 @@ int main(int argc, const char* argv[]) {
 			wr.border = styles[i].border;
 			wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 			CMDcount += (wr.count = typeOff[i+1] - typeOff[i]);
-			VBOcount += data.roadOffsets[typeOff[i+1]] - data.roadOffsets[typeOff[i]];
 		}
 	};
 	addRoads(data.roadTypeOffsets, roadStyles);
@@ -75,21 +132,19 @@ int main(int argc, const char* argv[]) {
 		wr.border = false;
 		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
 		CMDcount += (wr.count = data.boundaries.second - data.boundaries.first);
-		VBOcount += data.roadOffsets[data.boundaries.second] - data.roadOffsets[data.boundaries.first];
 	}
 	// Forests
 	window.forestsCount =
 		3 * (data.roadOffsets[data.forests.second] - data.roadOffsets[data.forests.first])
 		- 6 * (data.forests.second - data.forests.first);
-	VBOcount += data.roadOffsets[data.forests.second] - data.roadOffsets[data.forests.first];
 	// Capitals points
-	window.capitalsFirst = VBOcount;
-	VBOcount += (window.capitalsCount = data.capitals.size());
+	window.capitalsFirst = data.roads.size();
+	window.capitalsCount = data.capitals.size();
 
 	// VBO, EBO, cmdBuffer
 	GLuint VBO, EBO;
 	glCreateBuffers(1, &VBO);
-	glNamedBufferStorage(VBO, VBOcount * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
+	glNamedBufferStorage(VBO, (window.capitalsFirst + window.capitalsCount) * sizeof(vec2f), nullptr, GL_MAP_WRITE_BIT);
 	glCreateBuffers(1, &EBO);
 	glNamedBufferStorage(EBO, window.forestsCount * sizeof(uint32_t), nullptr, GL_MAP_WRITE_BIT);
 	glCreateBuffers(1, &window.cmdBuffer);

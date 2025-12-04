@@ -32,39 +32,45 @@ struct Edge {
 	inline int a() const { return prev->b; };
 };
 
-vector<uint32_t> triangulate(const vec2l *pts, int Npts) {
-	if(Npts == 3)
+vector<uint32_t> triangulate(const vec2l *pts, const uint32_t *ends, uint32_t Nloops) {
+	if(Nloops == 1 && *ends == 3u)
 		return {0u, 1u, 2u};
 	vector<uint32_t> indices;
 
 	// Using [V-E+F = 1-g] and [H = 3F = 2E-V] we get [H = 3V + 6(g-1)]
-	// Here g = 0
-	const int H = 3*Npts - 6;
-	int newEdge = Npts;
+	// Here g = Nloops - 1
+	const int V = ends[Nloops-1];
+	const int H = 3*V + 6 * (Nloops - 2);
+	indices.reserve(H);
+	int newEdge = V;
 	unique_ptr<Edge[]> edges(new Edge[H]);
-	vector<Edge*> in(Npts), out(Npts);
-	for(int i = 0; i < Npts; ++i) {
-		edges[i].b = i+1 == Npts ? 0 : i+1;
-		out[i] = &edges[i];
-		if(i > 0) {
-			in[i] = out[i-1];
-			out[i]->connect(in[i]);
+	// TODO: unique_ptr for in and change following for loops
+	vector<Edge*> in(V), out(V);
+	for(uint32_t i = 0, j = 0; i < Nloops; ++i) {
+		const uint32_t j0 = j;
+		for(; j < ends[i]; ++j) {
+			edges[j].b = j+1 == ends[i] ? j0 : j+1;
+			out[j] = &edges[j];
+			if(j > j0) {
+				in[j] = out[j-1];
+				out[j]->connect(in[j]);
+			}
 		}
+		in[j0] = out[ends[i]-1];
+		out[j0]->connect(in[j0]);
 	}
-	in[0] = out.back();
-	out[0]->connect(in[0]);
 
 	const auto compY = [&](const int i, const int j)->bool {
 		return pts[i].y < pts[j].y || (pts[i].y == pts[j].y && pts[i].x < pts[j].x);
 	};
-	vector<int> order(Npts);
+	vector<int> order(V);
 	ranges::iota(order, 0);
 	ranges::sort(order, compY);
 	if(!turnLeft(pts, in[order[0]]->a(), order[0], out[order[0]]->b)) { // the contour is clockwise
 		// we make it counter-clockwise
-		for(int i = 0; i < Npts; ++i)
+		for(int i = 0; i < V; ++i)
 			out[i] = in[i]->prev;
-		for(int i = 0; i < Npts; ++i)
+		for(int i = 0; i < V; ++i)
 			swap(edges[i].prev, edges[i].next);
 	}
 
@@ -251,5 +257,6 @@ vector<uint32_t> triangulate(const vec2l *pts, int Npts) {
 		for(Edge *e : order) e->next = nullptr;
 	}
 
+	assert((int) indices.size() == H);
 	return indices;
 }

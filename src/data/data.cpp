@@ -8,55 +8,65 @@
 
 using namespace std;
 
-template<typename T>
-static void readValue(istream &in, T &x) {
-	in.read(reinterpret_cast<char*>(&x), sizeof(T));
+bool OSMData::isWayClosed(const uint32_t id) const {
+	if(forests.first <= id && id < forests.second) return true;
+	return false;
 }
 
-template<typename T>
-static void readVector(istream &in, vector<T> &v) {
+#define VALUES\
+	bbox,\
+	roads,\
+	roadOffsets,\
+	roadTypeOffsets,\
+	waterWayTypeOffsets,\
+	boundaries,\
+	refs,\
+	refOffsets,\
+	forests,\
+	forestsR,\
+	names,\
+	capitals,\
+	roadNames\
+
+static void readData(istream &) {}
+
+template<typename T, typename... Ts>
+static void readData(istream &in, T &x, Ts &... xs) {
+	in.read(reinterpret_cast<char*>(&x), sizeof(T));
+	readData(in, xs...);
+}
+
+template<typename T, typename... Ts>
+static void readData(istream &in, vector<T> &v, Ts &... xs) {
 	volatile uint32_t size;
 	in.read(reinterpret_cast<char*>(const_cast<uint32_t*>(&size)), sizeof(size));
 	v.resize(size);
 	in.read(reinterpret_cast<char*>(v.data()), v.size()*sizeof(T));
+	readData(in, xs...);
 }
 
 void OSMData::read(const char *fileName) {
 	ifstream in(fileName);
-	readValue(in, bbox);
-	readVector(in, roads);
-	readVector(in, roadOffsets);
-	readValue(in, roadTypeOffsets);
-	readValue(in, waterWayTypeOffsets);
-	readValue(in, boundaries);
-	readValue(in, forests);
-	readVector(in, names);
-	readVector(in, capitals);
-	readVector(in, roadNames);
+	readData(in, VALUES);
 }
 
-template<typename T>
-static void writeValue(ostream &out, const T &x) {
+static void writeData(ostream &) {}
+
+template<typename T, typename... Ts>
+static void writeData(ostream &out, const T &x, Ts const&... xs) {
 	out.write(reinterpret_cast<const char*>(&x), sizeof(T));
+	writeData(out, xs...);
 }
 
-template<typename T>
-static void writeVector(ostream &out, const vector<T> &v) {
+template<typename T, typename... Ts>
+static void writeData(ostream &out, const vector<T> &v, Ts const&... xs) {
 	volatile uint32_t size = v.size();
 	out.write(reinterpret_cast<const char*>(const_cast<uint32_t*>(&size)), sizeof(size));
 	out.write(reinterpret_cast<const char*>(v.data()), v.size()*sizeof(T));
+	writeData(out, xs...);
 }
 
 void OSMData::write(const char *fileName) const {
 	ofstream out(fileName);
-	writeValue(out, bbox);
-	writeVector(out, roads);
-	writeVector(out, roadOffsets);
-	writeValue(out, roadTypeOffsets);
-	writeValue(out, waterWayTypeOffsets);
-	writeValue(out, boundaries);
-	writeValue(out, forests);
-	writeVector(out, names);
-	writeVector(out, capitals);
-	writeVector(out, roadNames);
+	writeData(out, VALUES);
 }
