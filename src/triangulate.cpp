@@ -32,15 +32,15 @@ struct Edge {
 	inline int a() const { return prev->b; };
 };
 
-vector<uint32_t> triangulate(const vec2l *pts, const uint32_t *ends, uint32_t Nloops) {
+vector<uint32_t> triangulate(const vec2l *pts, const uint32_t *ends, uint32_t Nloops, uint32_t Nout) {
 	if(Nloops == 1 && *ends == 3u)
 		return {0u, 1u, 2u};
 	vector<uint32_t> indices;
 
-	// Using [V-E+F = 1-g] and [H = 3F = 2E-V] we get [H = 3V + 6(g-1)]
-	// Here g = Nloops - 1
+	// Using [V-E+F = Nout-g] and [H = 3F = 2E-V] we get [H = 3V + 6(g-Nout)]
+	// Here g = Nloops - Nout
 	const int V = ends[Nloops-1];
-	const int H = 3*V + 6 * (Nloops - 2);
+	const int H = 3*V + 6 * (Nloops - 2*Nout);
 	indices.reserve(H);
 	int newEdge = V;
 	unique_ptr<Edge[]> edges(new Edge[H]);

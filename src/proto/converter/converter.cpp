@@ -366,7 +366,7 @@ static void processMultipolygon(const Proto::Relation &relation, const vector<ve
 				polygons.data.push_back(w->ref);
 			}
 		}
-		if(polygons.off.size() == 8) cerr << relation.id << endl;
+		if(polygons.off.size() == 125) cerr << relation.id << endl;
 		polygons.end();
 	}
 }

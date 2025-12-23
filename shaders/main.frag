@@ -21,7 +21,8 @@ const vec2 tree2xy2 = tree2xy1 + vec2(0.04, .15);
 
 void main() {
 	fragColor = vec4(color, 1.);
-	vec2 uv = fract((gl_FragCoord.xy + center*scale/txtScale) / 40.);
+	vec2 delta = fract((center*scale/txtScale) / 40.);
+	vec2 uv = fract(gl_FragCoord.xy / 40. + delta);
 	vec2 uv1 = uv - tree1center;
 	float r1 = dot(uv1, uv1);
 	if(tree1rad1 < r1 && r1 < tree1rad2) fragColor.xyz *= 0.8;

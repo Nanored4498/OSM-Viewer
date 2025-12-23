@@ -48,29 +48,37 @@ int main(int argc, const char* argv[]) {
 
 	// Triangulate multipolygons
 	vector<uint32_t> forestIndices;
+	vector<pair<uint32_t, uint32_t>> edgesA, edgesB;
+	const auto vec2lComp = [&](const vec2l &a, const vec2l &b) {
+		return a.x < b.x || (a.x == b.x && a.y < b.y);
+	};
+	const auto edgeComp = [&](const pair<uint32_t, uint32_t> &a, const pair<uint32_t, uint32_t> &b) {
+		const vec2l &u = data.roads[a.first], &v = data.roads[b.first];
+		if(u == v) [[unlikely]] return vec2lComp(data.roads[a.second], data.roads[b.second]);
+		return vec2lComp(u, v);
+	};
 	for(const uint32_t i : views::iota(data.forestsR.first, data.forestsR.second)) {
 		const span<uint32_t> refs(data.refs.data() + data.refOffsets[i], data.refs.data() + data.refOffsets[i+1]);
 		size_t size = 0;
 		for(const uint32_t j : refs) size += data.roadOffsets[j+1]-data.roadOffsets[j];
 		unique_ptr<uint32_t[]> remap(new uint32_t[size + refs.size()]);
-		uint32_t *m = remap.get();
 		uint32_t *const ends = remap.get() + size;
-		uint32_t *e = ends;
 		bool out = true;
+		edgesA.clear();
+		edgesB.clear();
 		for(auto j = refs.begin(); j != refs.end(); ++j) {
-			// get a closed way [m0, m[
-			uint32_t *const m0 = m;
-			m += data.roadOffsets[*j+1] - data.roadOffsets[*j];
-			iota(m0, m, data.roadOffsets[*j]);
+			// get a closed way
+			uint32_t *m = remap.get() + (data.roadOffsets[*j+1] - data.roadOffsets[*j]);
+			iota(remap.get(), m, data.roadOffsets[*j]);
 			if(!data.isWayClosed(*j)) {
-				while(data.roads[*m0] != data.roads[*(m-1)]) {
+				while(data.roads[remap[0]] != data.roads[*(m-1)]) {
 					if((++j) == refs.end()) THROW_ERROR("way not closed");
-					uint32_t *const m1 = m;
+					uint32_t *const m0 = m;
 					m += data.roadOffsets[*j+1] - data.roadOffsets[*j] - 1;
-					if(data.roads[*(m1-1)] == data.roads[data.roadOffsets[*j]]) {
-						iota(m1, m, data.roadOffsets[*j]+1);
-					} else if(data.roads[*(m1-1)] == data.roads[data.roadOffsets[*j+1]-1]) {
-						ranges::iota(span(m1, m) | views::reverse, data.roadOffsets[*j]);
+					if(data.roads[*(m0-1)] == data.roads[data.roadOffsets[*j]]) {
+						iota(m0, m, data.roadOffsets[*j]+1);
+					} else if(data.roads[*(m0-1)] == data.roads[data.roadOffsets[*j+1]-1]) {
+						ranges::iota(span(m0, m) | views::reverse, data.roadOffsets[*j]);
 					} else THROW_ERROR("way not closed");
 				}
 				--m;
@@ -78,24 +86,100 @@ int main(int argc, const char* argv[]) {
 
 			// correct orientation
 			__int128_t area = 0;
-			const int N = m-m0;
+			const int N = m-remap.get();
 			for(int i = 0; i < N; ++i) {
-				const vec2l &a = data.roads[m0[i]];
-				const vec2l &b = data.roads[m0[(i+1)%N]];
+				const vec2l &a = data.roads[remap[i]];
+				const vec2l &b = data.roads[remap[(i+1)%N]];
 				area += __int128_t(a.x - b.x) * (a.y + b.y);
 			}
-			if(out != (area > 0)) reverse(m0, m);
+			if(out != (area > 0)) reverse(remap.get(), m);
 			out = false;
+
+			// update graph
+			for(int i = 0; i < N; ++i) {
+				const uint32_t a = remap[i];
+				const uint32_t b = remap[(i+1)%N];
+				if(vec2lComp(data.roads[a], data.roads[b])) edgesA.emplace_back(a, b);
+				else edgesB.emplace_back(b, a);
+			}
+		}
+
+		ranges::sort(edgesA, edgeComp);
+		ranges::sort(edgesB, edgeComp);
+		auto itA = edgesA.begin(), itB = edgesB.begin();
+		auto wA = itA, wB = itB;
+		while(itA != edgesA.end() && itB != edgesB.end()) {
+			const vec2l &u = data.roads[itA->first], &v = data.roads[itB->first];
+			if(u != v) {
+				if(vec2lComp(u, v)) *(wA++) = *(itA++);
+				else *(wB++) = *(itB++);
+				continue;
+			}
+			const vec2l &u2 = data.roads[itA->second], &v2 = data.roads[itB->second];
+			if(u2 != v2) {
+				if(vec2lComp(u2, v2)) *(wA++) = *(itA++);
+				else *(wB++) = *(itB++);
+				continue;
+			}
+			++ itA;
+			++ itB;
+		}
+		wA = copy(itA, edgesA.end(), wA);
+		wB = copy(itB, edgesB.end(), wB);
+		edgesB.resize(wB - edgesB.begin());
+		edgesA.resize((wA - edgesA.begin()) + edgesB.size());
+		for(auto &[a, b] : edgesB) swap(a, b);
+		ranges::sort(edgesB, edgeComp);
+		wA = edgesA.end();
+		itA = wA - edgesB.size();
+		itB = edgesB.end();
+		while(itA != edgesA.begin() && itB != edgesB.begin()) {
+			const vec2l &u = data.roads[(itA-1)->first], &v = data.roads[(itB-1)->first];
+			*(--wA) = vec2lComp(u, v) ? *(--itB) : *(--itA);
+		}
+		copy(edgesB.begin(), itB, edgesA.begin());
+		bool bad = false;
+		for(int j = 1; j < (int) edgesA.size(); ++j) {
+			if(data.roads[edgesA[j-1].first] == data.roads[edgesA[j].first]) {
+				bad = true;
+				break;
+			}
+		}
+		if(bad) {
+			cerr << "touching holes: " << i - data.forestsR.first << endl;
+			continue;
+		}
+
+		uint32_t *e = ends;
+		uint32_t *m = remap.get();
+		uint32_t n_out = 0;
+		for(auto &[a, b] : edgesA) {
+			if(b == numeric_limits<uint32_t>::max()) continue;
+			*(m++) = a;
+			vec2l *u = data.roads.data() + b;
+			b = numeric_limits<uint32_t>::max();
+			const vec2l &v = data.roads[a];
+			__int128_t area = __int128_t(v.x - u->x) * (v.y + u->y);
+			while(*u != v) {
+				auto it = ranges::lower_bound(edgesA, *u, vec2lComp, [&](const pair<uint32_t, uint32_t> &edge) {
+					return data.roads[edge.first];
+				});
+				if(it == edgesA.end() || data.roads[it->first] != *u) THROW_ERROR("dsqf,sdjkg");
+				vec2l* const u2 = data.roads.data() + it->second;
+				area += __int128_t(u->x - u2->x) * (u->y + u2->y);
+				u = u2;
+				it->second = numeric_limits<uint32_t>::max();
+				*(m++) = it->first;
+			}
 			*(e++) = m - remap.get();
+			if(area > 0) ++ n_out;
 		}
 
 		unique_ptr<vec2l[]> pts(new vec2l[m - remap.get()]);
 		transform(remap.get(), m, pts.get(), [&](const uint32_t j) {
 			return data.roads[j];
 		});
-		cerr << i - data.forestsR.first << endl;
-		// TODO: there some bugs due to shared points between inner loops
-		const vector<uint32_t> indices = triangulate(pts.get(), ends, e-ends);
+		const vector<uint32_t> indices = triangulate(pts.get(), ends, e-ends, n_out);
 		forestIndices.insert_range(forestIndices.end(), indices | views::transform([&](const uint32_t i) {
 			return remap[i];
 		}));
@@ -136,7 +220,8 @@ int main(int argc, const char* argv[]) {
 	// Forests
 	window.forestsCount =
 		3 * (data.roadOffsets[data.forests.second] - data.roadOffsets[data.forests.first])
-		- 6 * (data.forests.second - data.forests.first);
+		- 6 * (data.forests.second - data.forests.first)
+		+ forestIndices.size();
 	// Capitals points
 	window.capitalsFirst = data.roads.size();
 	window.capitalsCount = data.capitals.size();
@@ -169,6 +254,7 @@ int main(int argc, const char* argv[]) {
 		);
 		indMap = ranges::transform(indices, indMap, [&](uint32_t x) { return x + data.roadOffsets[i]; }).out;
 	}
+	indMap = ranges::copy(forestIndices, indMap).out;
 	glUnmapNamedBuffer(EBO);
 
 	// VAO
