@@ -16,9 +16,9 @@
 
 using namespace std;
 
-static bool turnLeft(const vec2l *pts, int i, int j, int k) {
-	__int128_t ax = pts[j].x - pts[i].x, ay = pts[j].y - pts[i].y;
-	__int128_t bx = pts[k].x - pts[j].x, by = pts[k].y - pts[j].y;
+static bool turnLeft(const vec2i *pts, int i, int j, int k) {
+	int64_t ax = pts[j].x - pts[i].x, ay = pts[j].y - pts[i].y;
+	int64_t bx = pts[k].x - pts[j].x, by = pts[k].y - pts[j].y;
 	return ax * by > ay * bx;
 }
 
@@ -32,7 +32,7 @@ struct Edge {
 	inline int a() const { return prev->b; };
 };
 
-vector<uint32_t> triangulate(const vec2l *pts, const uint32_t *ends, uint32_t Nloops, uint32_t Nout) {
+vector<uint32_t> triangulate(const vec2i *pts, const uint32_t *ends, uint32_t Nloops, uint32_t Nout) {
 	if(Nloops == 1 && *ends == 3u)
 		return {0u, 1u, 2u};
 	vector<uint32_t> indices;
@@ -78,10 +78,10 @@ vector<uint32_t> triangulate(const vec2l *pts, const uint32_t *ends, uint32_t Nl
 		int a1 = e1->prev ? e1->a() : e1->b, b1 = e1->b, a2 = e2->prev ? e2->a() : e2->b, b2 = e2->b;
 		if(pts[a1].y > pts[b1].y) swap(a1, b1);
 		if(pts[a2].y > pts[b2].y) swap(a2, b2);
-		__int128_t xa1 = pts[a1].x, xa2 = pts[a2].x;
-		int64_t ya1 = pts[a1].y, ya2 = pts[a2].y;
-		if(ya1 < ya2) xa1 += __int128_t(ya2 - ya1) * (pts[b1].x - xa1) / (pts[b1].y - ya1);
-		else if(ya1 > ya2) xa2 += __int128_t(ya1 - ya2) * (pts[b2].x - xa2) / (pts[b2].y - ya2);
+		int64_t xa1 = pts[a1].x, xa2 = pts[a2].x;
+		const int64_t ya1 = pts[a1].y, ya2 = pts[a2].y;
+		if(ya1 < ya2) xa1 += (ya2 - ya1) * (pts[b1].x - xa1) / (pts[b1].y - ya1);
+		else if(ya1 > ya2) xa2 += (ya1 - ya2) * (pts[b2].x - xa2) / (pts[b2].y - ya2);
 		if(xa1 != xa2) return xa1 < xa2;
 		else return e1 < e2;
 	};

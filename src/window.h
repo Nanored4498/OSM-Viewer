@@ -14,6 +14,13 @@
 #include "programs/generated/programs.h"
 #include "vec.h"
 
+struct DrawCommand {
+	GLuint count;
+	GLuint instanceCount;
+	GLuint first;
+	GLuint baseInstance;
+};
+
 struct Window {
 	void init(const vec2f &v0, const vec2f &v1);
 	void start();

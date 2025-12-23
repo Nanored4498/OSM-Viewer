@@ -30,6 +30,8 @@
 
 using namespace std;
 
+const int64_t MIN_GRANULARITY = 100;
+
 struct BinStream : public ifstream {
 	BinStream(const char* filename): ifstream(filename) {}
 	template<integral T>
@@ -49,10 +51,10 @@ unordered_set<string> supported_features = {
 static void readHeader(const vector<uint8_t> &blobData, OSMData &data) {
 	const Proto::HeaderBlock hb(blobData);
 	if(hb._has_bbox) {
-		data.bbox.min.x = hb.bbox.left;
-		data.bbox.min.y = hb.bbox.bottom;
-		data.bbox.max.x = hb.bbox.right;
-		data.bbox.max.y = hb.bbox.top;
+		data.bbox.min.x = hb.bbox.left / MIN_GRANULARITY;
+		data.bbox.min.y = hb.bbox.bottom / MIN_GRANULARITY;
+		data.bbox.max.x = (hb.bbox.right + MIN_GRANULARITY) / MIN_GRANULARITY;
+		data.bbox.max.y = (hb.bbox.top + MIN_GRANULARITY) / MIN_GRANULARITY;
 	}
 	for(const string &feature : hb.required_features) {
 		if(!supported_features.count(feature))
@@ -85,7 +87,7 @@ enum class TmpRoadFlag {
 	RENDERED_AREA,
 	COUNT
 };
-using TmpRoad = TmpContainer<vec2l, TmpRoadFlag>;
+using TmpRoad = TmpContainer<vec2i, TmpRoadFlag>;
 
 struct TmpRef {
 	TmpRoad* storage = nullptr;
@@ -114,7 +116,7 @@ static inline string_view getString(const vector<vector<uint8_t>> &ST, uint32_t 
 //// NODE ////
 //////////////
 
-HashMap<vec2l> nodes;
+HashMap<vec2i> nodes;
 
 static void readDense(const Proto::PrimitiveBlock &pb, const Proto::DenseNodes &dense, const vector<vector<uint8_t>> &ST, OSMData &data) {
 	const int N = dense.id.size();
@@ -126,7 +128,7 @@ static void readDense(const Proto::PrimitiveBlock &pb, const Proto::DenseNodes &
 		id += dense.id[i];
 		lat += dense.lat[i];
 		lon += dense.lon[i];
-		vec2l &node = nodes[id];
+		vec2i &node = nodes[id];
 		node.x = pb.lon_offset + pb.granularity * lon;
 		node.y = pb.lat_offset + pb.granularity * lat;
 
@@ -216,7 +218,7 @@ static void readWay(const Proto::Way &way, const vector<vector<uint8_t>> &ST, Tm
 static void processMultipolygon(const Proto::Relation &relation, const vector<vector<uint8_t>> &ST, TmpRoad &misc, TmpRelation &polygons) {
 	struct Component {
 		vector<Way*> outer, inner;
-		__int128_t area = 0;
+		int64_t area = 0;
 	};
 	vector<Component> cs;
 	vector<vector<Way*>> inners;
@@ -301,11 +303,11 @@ static void processMultipolygon(const Proto::Relation &relation, const vector<ve
 		int64_t last = c.outer[0]->way[0];
 		for(const Way* way : c.outer) {
 			const vector<int64_t> &w = way->way;
-			__int128_t wa = 0;
+			int64_t wa = 0;
 			for(uint32_t i = 1; i < w.size(); ++i) {
-				const vec2l &a = nodes[w[i-1]];
-				const vec2l &b = nodes[w[i]];
-				wa += __int128_t(a.x - b.x) * (a.y + b.y);
+				const vec2i &a = nodes[w[i-1]];
+				const vec2i &b = nodes[w[i]];
+				wa += int64_t(a.x - b.x) * (a.y + b.y);
 			}
 			if(last == w[0]) {
 				c.area += wa;
@@ -317,24 +319,24 @@ static void processMultipolygon(const Proto::Relation &relation, const vector<ve
 		}
 		c.area = abs(c.area);
 	}
-	ranges::sort(cs, less<__int128_t>{}, [&](const Component &c) { return c.area; });
+	ranges::sort(cs, less<int64_t>{}, [&](const Component &c) { return c.area; });
 
 	// Add inners to components
 	for(const vector<Way*> &in : inners) {
 		for(Component &c : cs) {
 			for(const Way* inWay : in) {
 				for(const int64_t id : inWay->way) {
-					const vec2l &v = nodes[id];
+					const vec2i &v = nodes[id];
 					uint32_t winding = 0;
 					for(const Way* way : c.outer) {
 						const vector<int64_t> &w = way->way;
 						for(uint32_t i = 1; i < w.size(); ++i) {
-							vec2l a = nodes[w[i-1]];
-							vec2l b = nodes[w[i]];
+							vec2i a = nodes[w[i-1]];
+							vec2i b = nodes[w[i]];
 							if(a.y > b.y) swap(a, b);
 							if(v.y < a.y) continue;
 							if(b.y <= v.y) continue;
-							const __int128_t diff = __int128_t(v.x-a.x) * (b.y-a.y) - __int128_t(b.x-a.x) * (v.y-a.y);
+							const int64_t diff = int64_t(v.x-a.x) * (b.y-a.y) - int64_t(b.x-a.x) * (v.y-a.y);
 							if(diff > 0) ++ winding;
 							else if(diff == 0) goto v_over_outer;
 						}
@@ -366,7 +368,7 @@ static void processMultipolygon(const Proto::Relation &relation, const vector<ve
 				polygons.data.push_back(w->ref);
 			}
 		}
-		if(polygons.off.size() == 125) cerr << relation.id << endl;
+		if(polygons.off.size() == 2641) cerr << relation.id << endl;
 		polygons.end();
 	}
 }
@@ -480,7 +482,12 @@ int main(int argc, const char* argv[]) {
 			readHeader(blobData, data);
 		} else if(header.type == "OSMData") {
 			if(!hasHeader) THROW_ERROR("OSMData blob before any OSMHeader...");
-			const Proto::PrimitiveBlock pb(blobData);
+			Proto::PrimitiveBlock pb(blobData);
+			if((pb.lat_offset % MIN_GRANULARITY) != 0 || (pb.lon_offset % MIN_GRANULARITY) != 0 || (pb.granularity % MIN_GRANULARITY) != 0)
+				THROW_ERROR("Coordinates should be multiple of " + to_string(MIN_GRANULARITY));
+			pb.lat_offset /= MIN_GRANULARITY;
+			pb.lon_offset /= MIN_GRANULARITY;
+			pb.granularity /= MIN_GRANULARITY;
 			const auto &ST = pb.stringtable.s;
 			for(const Proto::PrimitiveGroup &pg : pb.primitivegroup) {
 				if(!pg.nodes.empty()) THROW_ERROR("Not implemented");
@@ -495,8 +502,8 @@ int main(int argc, const char* argv[]) {
 	input.close();
 
 	// If no bbox, compute it
-	if(data.bbox.min.x == numeric_limits<int64_t>::max())
-		for(const vec2l &node : nodes | views::values)
+	if(data.bbox.min.x == numeric_limits<int32_t>::max())
+		for(const vec2i &node : nodes | views::values)
 			data.bbox.update(node);
 	
 	// Transfert tmpData ==> data

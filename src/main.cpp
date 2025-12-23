@@ -49,13 +49,13 @@ int main(int argc, const char* argv[]) {
 	// Triangulate multipolygons
 	vector<uint32_t> forestIndices;
 	vector<pair<uint32_t, uint32_t>> edgesA, edgesB;
-	const auto vec2lComp = [&](const vec2l &a, const vec2l &b) {
+	const auto vec2Comp = [&](const vec2i &a, const vec2i &b) {
 		return a.x < b.x || (a.x == b.x && a.y < b.y);
 	};
 	const auto edgeComp = [&](const pair<uint32_t, uint32_t> &a, const pair<uint32_t, uint32_t> &b) {
-		const vec2l &u = data.roads[a.first], &v = data.roads[b.first];
-		if(u == v) [[unlikely]] return vec2lComp(data.roads[a.second], data.roads[b.second]);
-		return vec2lComp(u, v);
+		const vec2i &u = data.roads[a.first], &v = data.roads[b.first];
+		if(u == v) [[unlikely]] return vec2Comp(data.roads[a.second], data.roads[b.second]);
+		return vec2Comp(u, v);
 	};
 	for(const uint32_t i : views::iota(data.forestsR.first, data.forestsR.second)) {
 		const span<uint32_t> refs(data.refs.data() + data.refOffsets[i], data.refs.data() + data.refOffsets[i+1]);
@@ -85,12 +85,12 @@ int main(int argc, const char* argv[]) {
 			}
 
 			// correct orientation
-			__int128_t area = 0;
+			int64_t area = 0;
 			const int N = m-remap.get();
 			for(int i = 0; i < N; ++i) {
-				const vec2l &a = data.roads[remap[i]];
-				const vec2l &b = data.roads[remap[(i+1)%N]];
-				area += __int128_t(a.x - b.x) * (a.y + b.y);
+				const vec2i &a = data.roads[remap[i]];
+				const vec2i &b = data.roads[remap[(i+1)%N]];
+				area += int64_t(a.x - b.x) * (a.y + b.y);
 			}
 			if(out != (area > 0)) reverse(remap.get(), m);
 			out = false;
@@ -99,7 +99,7 @@ int main(int argc, const char* argv[]) {
 			for(int i = 0; i < N; ++i) {
 				const uint32_t a = remap[i];
 				const uint32_t b = remap[(i+1)%N];
-				if(vec2lComp(data.roads[a], data.roads[b])) edgesA.emplace_back(a, b);
+				if(vec2Comp(data.roads[a], data.roads[b])) edgesA.emplace_back(a, b);
 				else edgesB.emplace_back(b, a);
 			}
 		}
@@ -109,15 +109,15 @@ int main(int argc, const char* argv[]) {
 		auto itA = edgesA.begin(), itB = edgesB.begin();
 		auto wA = itA, wB = itB;
 		while(itA != edgesA.end() && itB != edgesB.end()) {
-			const vec2l &u = data.roads[itA->first], &v = data.roads[itB->first];
+			const vec2i &u = data.roads[itA->first], &v = data.roads[itB->first];
 			if(u != v) {
-				if(vec2lComp(u, v)) *(wA++) = *(itA++);
+				if(vec2Comp(u, v)) *(wA++) = *(itA++);
 				else *(wB++) = *(itB++);
 				continue;
 			}
-			const vec2l &u2 = data.roads[itA->second], &v2 = data.roads[itB->second];
+			const vec2i &u2 = data.roads[itA->second], &v2 = data.roads[itB->second];
 			if(u2 != v2) {
-				if(vec2lComp(u2, v2)) *(wA++) = *(itA++);
+				if(vec2Comp(u2, v2)) *(wA++) = *(itA++);
 				else *(wB++) = *(itB++);
 				continue;
 			}
@@ -134,8 +134,8 @@ int main(int argc, const char* argv[]) {
 		itA = wA - edgesB.size();
 		itB = edgesB.end();
 		while(itA != edgesA.begin() && itB != edgesB.begin()) {
-			const vec2l &u = data.roads[(itA-1)->first], &v = data.roads[(itB-1)->first];
-			*(--wA) = vec2lComp(u, v) ? *(--itB) : *(--itA);
+			const vec2i &u = data.roads[(itA-1)->first], &v = data.roads[(itB-1)->first];
+			*(--wA) = vec2Comp(u, v) ? *(--itB) : *(--itA);
 		}
 		copy(edgesB.begin(), itB, edgesA.begin());
 		bool bad = false;
@@ -146,7 +146,7 @@ int main(int argc, const char* argv[]) {
 			}
 		}
 		if(bad) {
-			cerr << "touching holes: " << i - data.forestsR.first << endl;
+			cerr << "touching holes: " << i - data.forestsR.first << ' ' << refs.size() << endl;
 			continue;
 		}
 
@@ -156,17 +156,17 @@ int main(int argc, const char* argv[]) {
 		for(auto &[a, b] : edgesA) {
 			if(b == numeric_limits<uint32_t>::max()) continue;
 			*(m++) = a;
-			vec2l *u = data.roads.data() + b;
+			vec2i *u = data.roads.data() + b;
 			b = numeric_limits<uint32_t>::max();
-			const vec2l &v = data.roads[a];
-			__int128_t area = __int128_t(v.x - u->x) * (v.y + u->y);
+			const vec2i &v = data.roads[a];
+			int64_t area = int64_t(v.x - u->x) * (v.y + u->y);
 			while(*u != v) {
-				auto it = ranges::lower_bound(edgesA, *u, vec2lComp, [&](const pair<uint32_t, uint32_t> &edge) {
+				auto it = ranges::lower_bound(edgesA, *u, vec2Comp, [&](const pair<uint32_t, uint32_t> &edge) {
 					return data.roads[edge.first];
 				});
 				if(it == edgesA.end() || data.roads[it->first] != *u) THROW_ERROR("dsqf,sdjkg");
-				vec2l* const u2 = data.roads.data() + it->second;
-				area += __int128_t(u->x - u2->x) * (u->y + u2->y);
+				vec2i* const u2 = data.roads.data() + it->second;
+				area += int64_t(u->x - u2->x) * (u->y + u2->y);
 				u = u2;
 				it->second = numeric_limits<uint32_t>::max();
 				*(m++) = it->first;
@@ -175,7 +175,7 @@ int main(int argc, const char* argv[]) {
 			if(area > 0) ++ n_out;
 		}
 
-		unique_ptr<vec2l[]> pts(new vec2l[m - remap.get()]);
+		unique_ptr<vec2i[]> pts(new vec2i[m - remap.get()]);
 		transform(remap.get(), m, pts.get(), [&](const uint32_t j) {
 			return data.roads[j];
 		});
@@ -187,16 +187,15 @@ int main(int argc, const char* argv[]) {
 
 	// Create window
 	Window window;
-	const auto mercator = [&](const vec2l &node)->vec2f {
+	const auto mercator = [&](const vec2i &node)->vec2f {
 		return vec2f(
-			double(node.x) * (numbers::pi / 180e9),
-			log(tan(numbers::pi * (double(node.y) / 360e9 + .25)))
+			double(node.x) * (numbers::pi / 180e7),
+			log(tan(numbers::pi * (double(node.y) / 360e7 + .25)))
 		);
 	};
 	window.init(mercator(data.bbox.min), mercator(data.bbox.max));
 
 	// Compute size
-	// TODO: VBOcount and CMDcount useless
 	GLsizei CMDcount = 0;
 	const auto addRoads = [&](const auto &typeOff, const RoadStyle *styles) {
 		for(uint32_t i = 0; i+1 < std::size(typeOff); ++i) {
@@ -204,7 +203,7 @@ int main(int argc, const char* argv[]) {
 			wr.col = styles[i].col;
 			wr.col2 = styles[i].col2;
 			wr.border = styles[i].border;
-			wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
+			wr.offset = (const void*) (CMDcount * sizeof(DrawCommand));
 			CMDcount += (wr.count = typeOff[i+1] - typeOff[i]);
 		}
 	};
@@ -214,7 +213,7 @@ int main(int argc, const char* argv[]) {
 		Window::Road &wr = window.roads.emplace_back();
 		wr.col = countryBorderColor;
 		wr.border = false;
-		wr.offset = (const void*) (CMDcount * 4 * sizeof(GLuint));
+		wr.offset = (const void*) (CMDcount * sizeof(DrawCommand));
 		CMDcount += (wr.count = data.boundaries.second - data.boundaries.first);
 	}
 	// Forests
@@ -233,17 +232,17 @@ int main(int argc, const char* argv[]) {
 	glCreateBuffers(1, &EBO);
 	glNamedBufferStorage(EBO, window.forestsCount * sizeof(uint32_t), nullptr, GL_MAP_WRITE_BIT);
 	glCreateBuffers(1, &window.cmdBuffer);
-	glNamedBufferStorage(window.cmdBuffer, CMDcount * 4 * sizeof(GLuint), nullptr, GL_MAP_WRITE_BIT);
+	glNamedBufferStorage(window.cmdBuffer, CMDcount * sizeof(DrawCommand), nullptr, GL_MAP_WRITE_BIT);
 	vec2f* bufMap = (vec2f*) glMapNamedBuffer(VBO, GL_WRITE_ONLY);
 	bufMap = ranges::transform(data.roads, bufMap, mercator).out;
 	bufMap = ranges::transform(data.capitals, bufMap, [&](const auto &c) { return mercator(c.first); }).out;
 	glUnmapNamedBuffer(VBO);
-	GLuint *cmdMap = (GLuint*) glMapNamedBuffer(window.cmdBuffer, GL_WRITE_ONLY);
+	DrawCommand *cmdMap = (DrawCommand*) glMapNamedBuffer(window.cmdBuffer, GL_WRITE_ONLY);
 	for(uint32_t i = 0; i < data.boundaries.second; ++i) {
-		*(cmdMap++) = data.roadOffsets[i+1] - data.roadOffsets[i]; // count
-		*(cmdMap++) = 1; // instanceCount
-		*(cmdMap++) = data.roadOffsets[i]; // first
-		*(cmdMap++) = 0; // baseInstance
+		cmdMap[i].count = data.roadOffsets[i+1] - data.roadOffsets[i];
+		cmdMap[i].instanceCount = 1;
+		cmdMap[i].first = data.roadOffsets[i];
+		cmdMap[i].baseInstance = 0;
 	}
 	glUnmapNamedBuffer(window.cmdBuffer);
 	GLuint *indMap = (GLuint*) glMapNamedBuffer(EBO, GL_WRITE_ONLY);

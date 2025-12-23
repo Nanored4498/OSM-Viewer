@@ -79,6 +79,7 @@ struct vec2T : vec_base<2, T, vec2T<T>> {
 	vec2T(const vec_base<M, U, W> &other): vec_base<2, T, vec2T>(other) {}
 };
 using vec2f = vec2T<float>;
+using vec2i = vec2T<int32_t>;
 using vec2l = vec2T<int64_t>;
 
 template <typename T>
